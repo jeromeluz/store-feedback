@@ -34,6 +34,20 @@ function openSharedTaskIfReady(){
 $('storeLoginForm').addEventListener('submit',e=>{e.preventDefault();$('enter').click()});
 $('adminLoginForm').addEventListener('submit',e=>{e.preventDefault();$('adminSignIn').click()});
 $('enter').onclick=async()=>{try{$('loginError').textContent='';await enterStore($('storeName').value.trim())}catch(e){$('loginError').textContent=e.message}};
+// 快速登入只使用 Firebase 已保留的管理員登入狀態，不儲存帳號密碼。
+$('quickAdminLogin').onclick=async()=>{
+  const error=$('adminError');error.textContent='';
+  const pin=prompt('請輸入快速登入驗證碼');
+  if(pin===null)return;
+  if(pin!=='4302'){error.textContent='驗證碼錯誤';return;}
+  const user=auth.currentUser;
+  if(!user||user.isAnonymous){error.textContent='此瀏覽器尚未保留管理員登入狀態，請先使用帳號密碼登入一次';return;}
+  try{
+    const a=await getDoc(doc(db,'admins',user.uid));
+    if(!a.exists()||a.data().enabled!==true)throw Error('此帳號未獲管理者授權');
+    stop();admin=true;store=null;show('adminPage');openAdmin();say('管理者已登入');
+  }catch(e){error.textContent='快速登入失敗：'+e.message;}
+};
 $('adminSignIn').onclick=async()=>{try{$('adminError').textContent='';stop();await signOut(auth);const cred=await signInWithEmailAndPassword(auth,$('email').value.trim(),$('password').value);const a=await getDoc(doc(db,'admins',cred.user.uid));if(!a.exists()||a.data().enabled!==true)throw Error('此帳號未獲管理者授權');admin=true;store=null;show('adminPage');openAdmin();say('管理者已登入')}catch(e){$('adminError').textContent=e.message;admin=false;await signOut(auth).catch(()=>{})}};
 function renderStoreTasks(){if(activeResponseTask && !tasks.some(t=>t.id===activeResponseTask)){setTaskUrl(null);activeResponseTask=null;$('response').classList.add('hidden');$('tasks').classList.remove('hidden')} $('tasks').innerHTML=sortedTasks(tasks.filter(t=>!t.stores?.length||t.stores.includes(store.id)),$('storeSort').value).map(t=>`<div class="card"><h3>${esc(t.title)}</h3><p>${esc(t.time)}</p><p class="muted">截止 ${esc(t.deadline||'未設定')}　${answers[t.id]?.submitted?'已完成':answers[t.id]?'填寫中':'待填寫'}</p><button data-task="${esc(t.id)}">查看任務</button></div>`).join('')||'<div class="card">目前沒有任務</div>';$('tasks').querySelectorAll('[data-task]').forEach(b=>b.onclick=()=>openResponse(tasks.find(t=>t.id===b.dataset.task)))}
 const expired=t=>!!(t.deadlineAt?.toMillis&&Date.now()>t.deadlineAt.toMillis());
