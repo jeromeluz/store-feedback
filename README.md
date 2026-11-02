@@ -1,4 +1,14 @@
-# 區組回饋平台 V4 — GitHub Pages + Firebase Spark + Cloudinary Free
+# V5 介面調整
+
+- 管理者任務列表每筆提供「編輯」「刪除」「回饋查看」。
+- 編輯任務與回饋查看改為獨立畫面，不在任務列表下方展開。
+- 回饋總覽整合進個別任務的「回饋查看」。
+- 門市端點選任務才顯示填寫畫面，可返回任務列表。
+- 延用 V4 的 Firebase、Cloudinary 設定與 Firestore 規則。
+- 部署 GitHub Pages 時，將 index.html、app.js、config.js 放在儲存庫根目錄，取代舊檔。
+- 此版本已通過 JavaScript 語法檢查，未經線上 Firebase 實測。
+
+# 區組回饋平台 V5 — GitHub Pages + Firebase Spark + Cloudinary Free
 
 ## 已設定
 - Firebase Project ID: `pcscteam-ff6b2`
