@@ -6,7 +6,7 @@ const app=initializeApp(firebaseConfig),auth=getAuth(app),db=getFirestore(app),$
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const cleanUrl=u=>{try{const x=new URL(u);return x.protocol==='https:'&&x.hostname==='res.cloudinary.com'&&x.pathname.startsWith('/'+cloudinary.cloudName+'/')?x.href:''}catch{return ''}};
 const sharedTaskId=new URLSearchParams(location.search).get('task');
-let sharedTaskOpened=false;
+let sharedTaskOpened=false,taskSnapshotReady=false,responseSnapshotReady=false;
 let store=null,admin=false,stores=[],tasks=[],answers={},editing=null,unsubs=[],saveTimers=new Map(),epoch=0,feedbackRows=[],activeFeedbackTask=null,activeResponseTask=null;
 const say=s=>$('status').textContent=s;
 const show=id=>['login','storePage','adminLogin','adminPage'].forEach(k=>$(k).classList.toggle('hidden',k!==id));
@@ -16,9 +16,9 @@ const key=(s,t)=>s+'__'+t;
 async function anonymous(){if(!auth.currentUser||!auth.currentUser.isAnonymous){await signOut(auth);await signInAnonymously(auth)}}
 async function logout(){stop();store=null;admin=false;localStorage.removeItem('storeName');await signOut(auth);show('login');say('請登入')}
 $('storeLogout').onclick=logout;$('adminLogout').onclick=logout;$('adminEntry').onclick=()=>{stop();show('adminLogin')};$('backLogin').onclick=()=>show('login');
-async function enterStore(name){stop();await anonymous();const snap=await getDocs(collection(db,'stores'));const match=snap.docs.map(x=>({id:x.id,...x.data()})).find(x=>x.enabled&&x.name===name);if(!match)throw Error('找不到此門市或門市已停用');store=match;admin=false;localStorage.setItem('storeName',name);show('storePage');$('storeTitle').textContent=name+'｜回饋任務';activeResponseTask=null;$('tasks').classList.remove('hidden');$('response').classList.add('hidden');listen(collection(db,'tasks'),s=>{tasks=s.docs.map(d=>({id:d.id,...d.data()}));renderStoreTasks();openSharedTaskIfReady()});listen(collection(db,'responses'),s=>{answers={};s.docs.forEach(d=>{const v=d.data();if(v.storeId===store.id)answers[v.taskId]=v});renderStoreTasks();openSharedTaskIfReady()});say('已連線')}
+async function enterStore(name){stop();sharedTaskOpened=false;taskSnapshotReady=false;responseSnapshotReady=false;answers={};tasks=[];await anonymous();const snap=await getDocs(collection(db,'stores'));const match=snap.docs.map(x=>({id:x.id,...x.data()})).find(x=>x.enabled&&x.name===name);if(!match)throw Error('找不到此門市或門市已停用');store=match;admin=false;localStorage.setItem('storeName',name);show('storePage');$('storeTitle').textContent=name+'｜回饋任務';activeResponseTask=null;$('tasks').classList.remove('hidden');$('response').classList.add('hidden');listen(collection(db,'tasks'),s=>{tasks=s.docs.map(d=>({id:d.id,...d.data()}));taskSnapshotReady=true;renderStoreTasks();openSharedTaskIfReady()});listen(collection(db,'responses'),s=>{answers={};s.docs.forEach(d=>{const v=d.data();if(v.storeId===store.id)answers[v.taskId]=v});responseSnapshotReady=true;renderStoreTasks();openSharedTaskIfReady()});say('已連線')}
 function openSharedTaskIfReady(){
- if(!sharedTaskId||sharedTaskOpened||!store||!tasks.length)return;
+ if(!sharedTaskId||sharedTaskOpened||!store||!taskSnapshotReady||!responseSnapshotReady)return;
  const t=tasks.find(x=>x.id===sharedTaskId);
  if(!t){$('sharedTaskHint').textContent='此任務不存在或已刪除，可進入門市查看其他任務';return;}
  if(t.stores?.length&&!t.stores.includes(store.id)){
