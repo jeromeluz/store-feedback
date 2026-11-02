@@ -2,6 +2,7 @@ import {initializeApp} from 'https://www.gstatic.com/firebasejs/11.10.0/firebase
 import {getAuth,signInAnonymously,signInWithEmailAndPassword,signOut,onAuthStateChanged} from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js';
 import {getFirestore,collection,doc,getDoc,getDocs,setDoc,deleteDoc,onSnapshot,serverTimestamp,Timestamp} from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js';
 import {firebaseConfig,cloudinary} from './config.js';
+console.info('區組回饋平台 build 20261102-11');
 const app=initializeApp(firebaseConfig),auth=getAuth(app),db=getFirestore(app),$=id=>document.getElementById(id);
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const cleanUrl=u=>{try{const x=new URL(u);return x.protocol==='https:'&&x.hostname==='res.cloudinary.com'&&x.pathname.startsWith('/'+cloudinary.cloudName+'/')?x.href:''}catch{return ''}};
@@ -30,9 +31,8 @@ function openSharedTaskIfReady(){
  }
  sharedTaskOpened=true;openResponse(t);
 }
-$('storeName').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.isComposing){e.preventDefault();$('enter').click()}});
-$('password').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.isComposing){e.preventDefault();$('adminSignIn').click()}});
-$('email').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.isComposing){e.preventDefault();$('adminSignIn').click()}});
+$('storeLoginForm').addEventListener('submit',e=>{e.preventDefault();$('enter').click()});
+$('adminLoginForm').addEventListener('submit',e=>{e.preventDefault();$('adminSignIn').click()});
 $('enter').onclick=async()=>{try{$('loginError').textContent='';await enterStore($('storeName').value.trim())}catch(e){$('loginError').textContent=e.message}};
 $('adminSignIn').onclick=async()=>{try{$('adminError').textContent='';stop();await signOut(auth);const cred=await signInWithEmailAndPassword(auth,$('email').value.trim(),$('password').value);const a=await getDoc(doc(db,'admins',cred.user.uid));if(!a.exists()||a.data().enabled!==true)throw Error('此帳號未獲管理者授權');admin=true;store=null;show('adminPage');openAdmin();say('管理者已登入')}catch(e){$('adminError').textContent=e.message;admin=false;await signOut(auth).catch(()=>{})}};
 function renderStoreTasks(){if(activeResponseTask && !tasks.some(t=>t.id===activeResponseTask)){setTaskUrl(null);activeResponseTask=null;$('response').classList.add('hidden');$('tasks').classList.remove('hidden')} $('tasks').innerHTML=sortedTasks(tasks.filter(t=>!t.stores?.length||t.stores.includes(store.id)),$('storeSort').value).map(t=>`<div class="card"><h3>${esc(t.title)}</h3><p>${esc(t.time)}</p><p class="muted">截止 ${esc(t.deadline||'未設定')}　${answers[t.id]?.submitted?'已完成':answers[t.id]?'填寫中':'待填寫'}</p><button data-task="${esc(t.id)}">查看任務</button></div>`).join('')||'<div class="card">目前沒有任務</div>';$('tasks').querySelectorAll('[data-task]').forEach(b=>b.onclick=()=>openResponse(tasks.find(t=>t.id===b.dataset.task)))}
