@@ -5,6 +5,8 @@ import {firebaseConfig,cloudinary} from './config.js';
 const app=initializeApp(firebaseConfig),auth=getAuth(app),db=getFirestore(app),$=id=>document.getElementById(id);
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const cleanUrl=u=>{try{const x=new URL(u);return x.protocol==='https:'&&x.hostname==='res.cloudinary.com'&&x.pathname.startsWith('/'+cloudinary.cloudName+'/')?x.href:''}catch{return ''}};
+const sharedTaskId=new URLSearchParams(location.search).get('task');
+let sharedTaskOpened=false;
 let store=null,admin=false,stores=[],tasks=[],answers={},editing=null,unsubs=[],saveTimers=new Map(),epoch=0,feedbackRows=[],activeFeedbackTask=null,activeResponseTask=null;
 const say=s=>$('status').textContent=s;
 const show=id=>['login','storePage','adminLogin','adminPage'].forEach(k=>$(k).classList.toggle('hidden',k!==id));
@@ -14,7 +16,16 @@ const key=(s,t)=>s+'__'+t;
 async function anonymous(){if(!auth.currentUser||!auth.currentUser.isAnonymous){await signOut(auth);await signInAnonymously(auth)}}
 async function logout(){stop();store=null;admin=false;localStorage.removeItem('storeName');await signOut(auth);show('login');say('請登入')}
 $('storeLogout').onclick=logout;$('adminLogout').onclick=logout;$('adminEntry').onclick=()=>{stop();show('adminLogin')};$('backLogin').onclick=()=>show('login');
-async function enterStore(name){stop();await anonymous();const snap=await getDocs(collection(db,'stores'));const match=snap.docs.map(x=>({id:x.id,...x.data()})).find(x=>x.enabled&&x.name===name);if(!match)throw Error('找不到此門市或門市已停用');store=match;admin=false;localStorage.setItem('storeName',name);show('storePage');$('storeTitle').textContent=name+'｜回饋任務';activeResponseTask=null;$('tasks').classList.remove('hidden');$('response').classList.add('hidden');listen(collection(db,'tasks'),s=>{tasks=s.docs.map(d=>({id:d.id,...d.data()}));renderStoreTasks()});listen(collection(db,'responses'),s=>{answers={};s.docs.forEach(d=>{const v=d.data();if(v.storeId===store.id)answers[v.taskId]=v});renderStoreTasks()});say('已連線')}
+async function enterStore(name){stop();await anonymous();const snap=await getDocs(collection(db,'stores'));const match=snap.docs.map(x=>({id:x.id,...x.data()})).find(x=>x.enabled&&x.name===name);if(!match)throw Error('找不到此門市或門市已停用');store=match;admin=false;localStorage.setItem('storeName',name);show('storePage');$('storeTitle').textContent=name+'｜回饋任務';activeResponseTask=null;$('tasks').classList.remove('hidden');$('response').classList.add('hidden');listen(collection(db,'tasks'),s=>{tasks=s.docs.map(d=>({id:d.id,...d.data()}));renderStoreTasks();openSharedTaskIfReady()});listen(collection(db,'responses'),s=>{answers={};s.docs.forEach(d=>{const v=d.data();if(v.storeId===store.id)answers[v.taskId]=v});renderStoreTasks();openSharedTaskIfReady()});say('已連線')}
+function openSharedTaskIfReady(){
+ if(!sharedTaskId||sharedTaskOpened||!store||!tasks.length)return;
+ const t=tasks.find(x=>x.id===sharedTaskId);
+ if(!t){$('sharedTaskHint').textContent='此任務不存在或已刪除，可進入門市查看其他任務';return;}
+ if(t.stores?.length&&!t.stores.includes(store.id)){
+  $('sharedTaskHint').textContent='這個任務未指派給此門市，請確認門市名稱';return;
+ }
+ sharedTaskOpened=true;openResponse(t);
+}
 $('enter').onclick=async()=>{try{$('loginError').textContent='';await enterStore($('storeName').value.trim())}catch(e){$('loginError').textContent=e.message}};
 $('adminSignIn').onclick=async()=>{try{$('adminError').textContent='';if($('pin').value!=='4302')throw Error('驗證碼錯誤');stop();await signOut(auth);const cred=await signInWithEmailAndPassword(auth,$('email').value.trim(),$('password').value);const a=await getDoc(doc(db,'admins',cred.user.uid));if(!a.exists()||a.data().enabled!==true)throw Error('此帳號未獲管理者授權');admin=true;store=null;$('pin').value='';show('adminPage');openAdmin();say('管理者已登入')}catch(e){$('adminError').textContent=e.message;admin=false;await signOut(auth).catch(()=>{})}};
 function renderStoreTasks(){if(activeResponseTask && !tasks.some(t=>t.id===activeResponseTask)){activeResponseTask=null;$('response').classList.add('hidden');$('tasks').classList.remove('hidden')} $('tasks').innerHTML=tasks.filter(t=>!t.stores?.length||t.stores.includes(store.id)).map(t=>`<div class="card"><h3>${esc(t.title)}</h3><p>${esc(t.time)}</p><p class="muted">截止 ${esc(t.deadline||'未設定')}　${answers[t.id]?.submitted?'已完成':answers[t.id]?'填寫中':'待填寫'}</p><button data-task="${esc(t.id)}">查看任務</button></div>`).join('')||'<div class="card">目前沒有任務</div>';$('tasks').querySelectorAll('[data-task]').forEach(b=>b.onclick=()=>openResponse(tasks.find(t=>t.id===b.dataset.task)))}
@@ -37,7 +48,12 @@ function openTaskEditor(task){editing=structuredClone(task);showAdminSection('ed
 function openTaskFeedback(t){activeFeedbackTask=t.id;$('feedbackTitle').textContent='回饋查看｜'+t.title;showAdminSection('feedback');activeFeedbackTask=t.id;renderOverview(feedbackRows.filter(r=>r.taskId===t.id))}
 $('backAdminTasks').onclick=()=>showAdminSection('list');
 $('backFromFeedback').onclick=()=>showAdminSection('list');
-function renderAdminTasks(){$('adminTasks').innerHTML=tasks.map(t=>`<div class="task"><div class="task-summary"><div><strong>${esc(t.title)}</strong><p class="muted">截止 ${esc(t.deadline||'未設定')}</p></div><span class="pill">${feedbackRows.filter(r=>r.taskId===t.id).length} 筆回饋</span></div><div class="task-actions"><button data-edit="${esc(t.id)}">編輯</button><button class="danger" data-delete-task="${esc(t.id)}">刪除</button><button class="secondary" data-feedback="${esc(t.id)}">回饋查看</button></div></div>`).join('')||'<p>尚無任務</p>';
+function renderAdminTasks(){$('adminTasks').innerHTML=tasks.map(t=>`<div class="task"><div class="task-summary"><div><strong>${esc(t.title)}</strong><p class="muted">截止 ${esc(t.deadline||'未設定')}</p></div><span class="pill">${feedbackRows.filter(r=>r.taskId===t.id).length} 筆回饋</span></div><div class="task-actions"><button data-edit="${esc(t.id)}">編輯</button><button class="danger" data-delete-task="${esc(t.id)}">刪除</button><button class="secondary" data-feedback="${esc(t.id)}">回饋查看</button><button class="secondary" data-share="${esc(t.id)}">分享網址</button></div></div>`).join('')||'<p>尚無任務</p>';
+$('adminTasks').querySelectorAll('[data-share]').forEach(b=>b.onclick=async()=>{
+ const url=new URL(location.href);url.search='';url.hash='';url.searchParams.set('task',b.dataset.share);
+ try{await navigator.clipboard.writeText(url.href);alert('已複製任務網址\n'+url.href)}
+ catch(e){prompt('請複製此任務網址',url.href)}
+});
 $('adminTasks').querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openTaskEditor(tasks.find(t=>t.id===b.dataset.edit)));
 $('adminTasks').querySelectorAll('[data-feedback]').forEach(b=>b.onclick=()=>openTaskFeedback(tasks.find(t=>t.id===b.dataset.feedback)));
 $('adminTasks').querySelectorAll('[data-delete-task]').forEach(b=>b.onclick=async()=>{const t=tasks.find(x=>x.id===b.dataset.deleteTask);if(!t||!confirm('確定刪除任務「'+t.title+'」？回饋紀錄會保留'))return;try{await deleteDoc(doc(db,'tasks',t.id))}catch(e){alert('刪除失敗：'+e.message)}})}

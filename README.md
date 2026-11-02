@@ -55,3 +55,9 @@ Firebase Spark 與 Cloudinary Free 有用量限制，超額可能暫停服務，
 - 截止日期使用瀏覽器當地時間轉成 Firestore Timestamp，規則用伺服器時間檢查是否逾期。
 - 若管理者改名，舊回饋會保留舊門市顯示名稱；請勿重複建立同名門市。
 - 本專案是可部署測試版，尚未進行正式安全稽核或完整多使用者驗收。
+
+
+## V6 任務分享網址
+管理者登入後在「任務管理」每個任務點「分享網址」，即可複製 `https://jeromeluz.github.io/store-feedback/?task=任務ID`。門市開啟連結，輸入已建立且啟用的門市名稱，若任務有指派該門市，會直接跳轉到該任務填答頁。無權限、刪除的任務不會跳轉。請上傳 V6 的 index.html 與 app.js，保留 config.js。
+
+注意：網址不是登入憑證，門市名稱仍無法驗證身分；現有 Firestore 規則允許匿名使用者讀取回饋資料，不適用敏感資料。Cloudinary unsigned 上傳可能被濫用。
