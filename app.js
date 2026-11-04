@@ -2,7 +2,7 @@ import {initializeApp} from 'https://www.gstatic.com/firebasejs/11.10.0/firebase
 import {getAuth,signInAnonymously,signInWithEmailAndPassword,signOut,onAuthStateChanged} from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js';
 import {getFirestore,collection,doc,getDoc,getDocs,setDoc,deleteDoc,onSnapshot,serverTimestamp,Timestamp,runTransaction,query,where} from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js';
 import {firebaseConfig,cloudinary} from './config.js';
-console.info('區組回饋平台 build 20261104-22');
+console.info('區組回饋平台 build 20261104-23');
 const app=initializeApp(firebaseConfig),auth=getAuth(app),db=getFirestore(app),$=id=>document.getElementById(id);
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const cleanUrl=u=>{try{const x=new URL(u);return x.protocol==='https:'&&x.hostname==='res.cloudinary.com'&&x.pathname.startsWith('/'+cloudinary.cloudName+'/')?x.href:''}catch{return ''}};
@@ -26,7 +26,7 @@ const scoped=(type,id)=>id?doc(db,'groups',ownerId,type,id):collection(db,'group
 const directoryId=name=>encodeURIComponent(name.normalize('NFC').trim());
 const codeRef=code=>doc(db,'storeCodes',String(code).trim());
 let catalog=[];
-async function loadCatalog(){if(catalog.length)return catalog;const response=await fetch('./store-catalog.json?build=20261104-22');if(!response.ok)throw Error('門市名冊載入失敗');catalog=await response.json();return catalog;}
+async function loadCatalog(){if(catalog.length)return catalog;const response=await fetch('./store-catalog.json?build=20261104-23');if(!response.ok)throw Error('門市名冊載入失敗');catalog=await response.json();return catalog;}
 const catalogByCode=code=>catalog.find(x=>x.code===String(code));
 const displayStore=s=>s.code?`${s.name}(${s.code})`:s.name;
 
