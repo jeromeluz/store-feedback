@@ -5,11 +5,11 @@ service cloud.firestore {
   function manager() { return signed() && request.auth.token.firebase.sign_in_provider == 'password' && exists(/databases/$(database)/documents/admins/$(request.auth.uid)) && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.enabled == true; }
   function guest() { return signed() && request.auth.token.firebase.sign_in_provider == 'anonymous'; }
   function validStore(id) { return exists(/databases/$(database)/documents/stores/$(id)) && get(/databases/$(database)/documents/stores/$(id)).data.enabled == true; }
-  function validTask(s,t) { return exists(/databases/$(database)/documents/tasks/$(t)) && (get(/databases/$(database)/documents/tasks/$(t)).data.stores.size() == 0 || s in get(/databases/$(database)/documents/tasks/$(t)).data.stores) && (get(/databases/$(database)/documents/tasks/$(t)).data.deadlineAt == null || request.time < get(/databases/$(database)/documents/tasks/$(t)).data.deadlineAt); }
+  function validTask(s,t) { return exists(/databases/$(database)/documents/tasks/$(t)) && get(/databases/$(database)/documents/tasks/$(t)).data.get('status', 'published') == 'published' && (get(/databases/$(database)/documents/tasks/$(t)).data.stores.size() == 0 || s in get(/databases/$(database)/documents/tasks/$(t)).data.stores) && (get(/databases/$(database)/documents/tasks/$(t)).data.deadlineAt == null || request.time < get(/databases/$(database)/documents/tasks/$(t)).data.deadlineAt); }
   function validResponse(id,d) { return guest() && d.keys().hasOnly(['storeId','store','taskId','answers','submitted','updatedAt']) && d.storeId is string && d.taskId is string && d.store is string && d.answers is map && d.answers.size() <= 80 && d.store == get(/databases/$(database)/documents/stores/$(d.storeId)).data.name && id == d.storeId + '__' + d.taskId && validStore(d.storeId) && validTask(d.storeId,d.taskId) && d.updatedAt == request.time; }
   match /admins/{id} { allow get: if signed() && request.auth.uid == id; allow list,write: if false; }
   match /stores/{id} { allow read: if manager() || guest(); allow write: if manager(); }
-  match /tasks/{id} { allow read: if manager() || guest(); allow write: if manager(); }
+  match /tasks/{id} { allow get,list: if manager() || (guest() && resource.data.get('status', 'published') == 'published'); allow write: if manager(); }
   match /responses/{id} {
    // Name-only access is NOT identity verification. Anonymous users can read other stores' answers.
    allow read: if manager() || guest();
