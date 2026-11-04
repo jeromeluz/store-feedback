@@ -2,7 +2,7 @@ import {initializeApp} from 'https://www.gstatic.com/firebasejs/11.10.0/firebase
 import {getAuth,signInAnonymously,signInWithEmailAndPassword,signOut,onAuthStateChanged} from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js';
 import {getFirestore,collection,doc,getDoc,getDocs,setDoc,deleteDoc,onSnapshot,serverTimestamp,Timestamp,runTransaction,query,where} from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js';
 import {firebaseConfig,cloudinary} from './config.js';
-console.info('區組回饋平台 build 20261104-19');
+console.info('區組回饋平台 build 20261104-20');
 const app=initializeApp(firebaseConfig),auth=getAuth(app),db=getFirestore(app),$=id=>document.getElementById(id);
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const cleanUrl=u=>{try{const x=new URL(u);return x.protocol==='https:'&&x.hostname==='res.cloudinary.com'&&x.pathname.startsWith('/'+cloudinary.cloudName+'/')?x.href:''}catch{return ''}};
@@ -14,6 +14,7 @@ const isDraft=t=>t.status==='draft';
 const isExpired=t=>expired(t);
 const timeText=v=>{if(!v)return '尚未上傳';const d=v.toDate?.()||(v.seconds?new Date(v.seconds*1000):new Date(v));return Number.isNaN(d.getTime())?'尚未上傳':d.toLocaleString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false})};
 const todayLocal=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`};
+const responseWrites=new Map();
 let sharedTaskOpened=false,taskSnapshotReady=false,responseSnapshotReady=false;
 let ownerId=null,store=null,admin=false,stores=[],tasks=[],answers={},editing=null,unsubs=[],saveTimers=new Map(),epoch=0,feedbackRows=[],activeFeedbackTask=null,activeResponseTask=null;
 const say=s=>$('status').textContent=s;
@@ -35,7 +36,7 @@ async function enterStore(name){
  const snap=await getDoc(scoped('stores',dir.data().storeId));
  if(!snap.exists()||!snap.data().enabled||snap.data().name!==name)throw Error('門市資料無效，請聯絡管理員');
  store={id:snap.id,...snap.data()};admin=false;localStorage.setItem('storeName',name);
- show('storePage');$('storeSort').parentElement.classList.remove('hidden');$('storeTitle').textContent=name+'｜回饋任務';activeResponseTask=null;$('tasks').classList.remove('hidden');$('response').classList.add('hidden');
+ show('storePage');$('storeSort').parentElement.classList.remove('hidden');$('storeBack').classList.add('hidden');$('storeTitle').textContent=name+'｜回饋任務';activeResponseTask=null;$('tasks').classList.remove('hidden');$('response').classList.add('hidden');
  listen(query(scoped('tasks'),where('status','==','published')),s=>{tasks=s.docs.map(d=>({id:d.id,...d.data()}));taskSnapshotReady=true;renderStoreTasks();openSharedTaskIfReady()});
  listen(scoped('responses'),s=>{answers={};s.docs.forEach(d=>{const v=d.data();if(v.storeId===store.id)answers[v.taskId]=v});responseSnapshotReady=true;renderStoreTasks();openSharedTaskIfReady()});say('已連線')
 }
@@ -70,7 +71,7 @@ $('adminSignIn').onclick=async()=>{try{$('adminError').textContent='';stop();awa
 // 以本地日期比較，避免跨時區造成日期偏移。
 function withinStoreWindow(t){const day=t.time;if(!/^\d{4}-\d{2}-\d{2}$/.test(day||''))return false;const today=new Date();today.setHours(0,0,0,0);const earliest=new Date(today);earliest.setDate(earliest.getDate()-13);return day>=`${earliest.getFullYear()}-${String(earliest.getMonth()+1).padStart(2,'0')}-${String(earliest.getDate()).padStart(2,'0')}`;}
 function renderStoreTasks(){
- if(activeResponseTask && !tasks.some(t=>t.id===activeResponseTask&&!isDraft(t)&&!isExpired(t))){setTaskUrl(null);activeResponseTask=null;$('response').classList.add('hidden');$('tasks').classList.remove('hidden')}
+ if(activeResponseTask && !tasks.some(t=>t.id===activeResponseTask&&!isDraft(t)&&!isExpired(t))){setTaskUrl(null);activeResponseTask=null;$('response').classList.add('hidden');$('tasks').classList.remove('hidden');$('storeBack').classList.add('hidden')}
  const eligible=tasks.filter(t=>!isDraft(t)&&withinStoreWindow(t)&&(!t.stores?.length||t.stores.includes(store.id)));
  const live=sortedTasks(eligible.filter(t=>!isExpired(t)),$('storeSort').value);
  const past=sortedTasks(eligible.filter(isExpired),$('storeSort').value);
@@ -81,15 +82,25 @@ function renderStoreTasks(){
  $('tasks').querySelectorAll('[data-task]').forEach(card=>{const open=()=>openResponse(tasks.find(t=>t.id===card.dataset.task));card.onclick=open;card.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();open()}}});
 }
 const expired=t=>!!(t.deadlineAt?.toMillis&&Date.now()>t.deadlineAt.toMillis());
-function openResponse(t){if(!t||isDraft(t)||!withinStoreWindow(t))return;setTaskUrl(t.id);activeResponseTask=t.id;$('tasks').classList.add('hidden');$('storeSort').parentElement.classList.add('hidden');const panel=$('response'),a=answers[t.id]?.answers||{},readonly=expired(t);panel.classList.remove('hidden');panel.innerHTML=`<button id="closeResponse" class="secondary">返回列表</button><h2>${esc(t.title)}</h2><p>${esc(t.time)}</p><p style="white-space:pre-wrap">${esc(t.description)}</p><p class="muted">截止 ${esc(t.deadline||'未設定')}</p>${(t.references||[]).map(u=>cleanUrl(u)?`<button type="button" class="image-trigger" data-lightbox="${esc(cleanUrl(u))}" aria-label="放大查看參考照片"><img class="preview" src="${esc(cleanUrl(u))}" alt="參考照片"></button>`:'').join('')}<div id="responseFields"></div><p id="saveState" class="muted">${readonly?'已截止 無法修改':'填寫後自動儲存'}</p><button id="submitResponse" ${readonly?'disabled':''}>完成回饋</button>`;$('closeResponse').onclick=()=>{setTaskUrl(null);sharedTaskId=null;activeResponseTask=null;panel.classList.add('hidden');$('tasks').classList.remove('hidden');$('storeSort').parentElement.classList.remove('hidden')};
+function openResponse(t){if(!t||isDraft(t)||!withinStoreWindow(t))return;setTaskUrl(t.id);activeResponseTask=t.id;$('tasks').classList.add('hidden');$('storeSort').parentElement.classList.add('hidden');const panel=$('response'),a=answers[t.id]?.answers||{},readonly=expired(t);$('storeBack').classList.remove('hidden');panel.classList.remove('hidden');panel.innerHTML=`<h2>${esc(t.title)}</h2><p>${esc(t.time)}</p><p style="white-space:pre-wrap">${esc(t.description)}</p><p class="muted">截止 ${esc(t.deadline||'未設定')}</p>${(t.references||[]).map(u=>cleanUrl(u)?`<button type="button" class="image-trigger" data-lightbox="${esc(cleanUrl(u))}" aria-label="放大查看參考照片"><img class="preview" src="${esc(cleanUrl(u))}" alt="參考照片"></button>`:'').join('')}<div id="responseFields"></div><p id="saveState" class="muted">${readonly?'已截止 無法修改':'填寫後自動儲存'}</p><button id="submitResponse" ${readonly?'disabled':''}>完成回饋</button>`;$('storeBack').onclick=()=>{setTaskUrl(null);sharedTaskId=null;activeResponseTask=null;panel.classList.add('hidden');$('tasks').classList.remove('hidden');$('storeSort').parentElement.classList.remove('hidden');$('storeBack').classList.add('hidden');renderStoreTasks()};
 $('responseFields').innerHTML=(t.questions||[]).map((q,i)=>`<div class="question"><label>${i+1}. ${esc(q.label)} ${q.required?'*':''}</label>${q.type==='yesno'?`<div class="yesno-group" role="group" aria-label="${esc(q.label)}" data-yesno="${esc(q.id)}"><button type="button" class="yesno-btn yes ${a[q.id]==='是'?'is-selected':''}" data-choice="是" aria-pressed="${a[q.id]==='是'}" ${readonly?'disabled':''}>✓ 是</button><button type="button" class="yesno-btn no ${a[q.id]==='否'?'is-selected':''}" data-choice="否" aria-pressed="${a[q.id]==='否'}" ${readonly?'disabled':''}>✕ 否</button></div>`:q.type==='text'?`<textarea data-answer="${esc(q.id)}" ${readonly?'disabled':''}>${esc(a[q.id]||'')}</textarea>`:`<input data-photo="${esc(q.id)}" type="file" accept="image/jpeg,image/png,image/webp" ${readonly?'disabled':''}><div>${cleanUrl(a[q.id])?`<button type="button" class="image-trigger photo-link" data-lightbox="${esc(cleanUrl(a[q.id]))}">查看已上傳照片</button>`:'尚未上傳'}</div>`}</div>`).join('');
 $('responseFields').querySelectorAll('[data-answer]').forEach(el=>el.oninput=()=>{const v={...(answers[t.id]?.answers||{}),[el.dataset.answer]:el.value};answers[t.id]={...(answers[t.id]||{}),answers:v};queueResponse(t,v)});
 $('responseFields').querySelectorAll('[data-yesno]').forEach(group=>{group.querySelectorAll('[data-choice]').forEach(btn=>btn.onclick=()=>{if(readonly)return;const choice=btn.dataset.choice;group.querySelectorAll('[data-choice]').forEach(b=>{const selected=b.dataset.choice===choice;b.classList.toggle('is-selected',selected);b.setAttribute('aria-pressed',String(selected))});const v={...(answers[t.id]?.answers||{}),[group.dataset.yesno]:choice};answers[t.id]={...(answers[t.id]||{}),answers:v};queueResponse(t,v)})});
 $('responseFields').querySelectorAll('[data-photo]').forEach(el=>el.onchange=async()=>{try{const f=el.files[0];if(!f)return;$('saveState').textContent='照片上傳中';const u=await upload(f);const v={...(answers[t.id]?.answers||{}),[el.dataset.photo]:u};answers[t.id]={...(answers[t.id]||{}),answers:v};await persistResponse(t,v);openResponse(t)}catch(e){$('saveState').textContent='上傳失敗：'+e.message}});
-$('submitResponse').onclick=async()=>{const v=answers[t.id]?.answers||{};if((t.questions||[]).some(q=>q.required&&!v[q.id]))return alert('請先完成必填題目');try{await persistResponse(t,v,true);alert('回饋已完成')}catch(e){alert('送出失敗：'+e.message)}};
+$('submitResponse').onclick=async()=>{const v=answers[t.id]?.answers||{};if(!allQuestionsAnswered(t,v))return alert('請先完成所有題目');try{await persistResponse(t,v,true);alert('回饋已完成')}catch(e){alert('送出失敗：'+e.message)}};
 }
-function queueResponse(t,v){const k='r'+t.id;clearTimeout(saveTimers.get(k));$('saveState').textContent='儲存中';saveTimers.set(k,setTimeout(()=>persistResponse(t,v).catch(e=>{$('saveState').textContent='儲存失敗：'+e.message}),800))}
-async function persistResponse(t,v,submitted=false){if(expired(t))throw Error('任務已截止');const payload={ownerId,storeId:store.id,store:store.name,taskId:t.id,answers:v,updatedAt:serverTimestamp()};if(submitted)payload.submitted=true;await setDoc(scoped('responses',key(store.id,t.id)),payload,{merge:true});if($('saveState'))$('saveState').textContent='已自動儲存'}
+function allQuestionsAnswered(t,v){const questions=t.questions||[];return questions.length>0&&questions.every(q=>{const answer=v[q.id];return typeof answer==='string'&&answer.trim().length>0})}
+function queueResponse(t,v){const k='r'+t.id;clearTimeout(saveTimers.get(k));$('saveState').textContent='儲存中';saveTimers.set(k,setTimeout(()=>persistResponse(t,v).catch(e=>{if(activeResponseTask===t.id)$('saveState').textContent='儲存失敗：'+e.message}),800))}
+async function persistResponse(t,v,forceSubmit=false){
+ if(expired(t))throw Error('任務已截止');
+ const submitted=forceSubmit||allQuestionsAnswered(t,v);
+ const payload={ownerId,storeId:store.id,store:store.name,taskId:t.id,answers:v,submitted,updatedAt:serverTimestamp()};
+ const previous=responseWrites.get(t.id)||Promise.resolve();
+ const write=previous.catch(()=>{}).then(()=>setDoc(scoped('responses',key(store.id,t.id)),payload,{merge:true}));
+ responseWrites.set(t.id,write);await write;
+ if(activeResponseTask===t.id&&$('saveState'))$('saveState').textContent=submitted?'回饋已完成並自動儲存':'已自動儲存';
+ // 即使門市立刻返回列表，也會由 Firestore 即時更新狀態。
+}
 async function upload(file){if(!['image/jpeg','image/png','image/webp'].includes(file.type))throw Error('僅接受 JPG PNG WebP');if(file.size>2*1024*1024)throw Error('照片不得超過 2 MB');const fd=new FormData();fd.append('file',file);fd.append('upload_preset',cloudinary.uploadPreset);const r=await fetch(`https://api.cloudinary.com/v1_1/${cloudinary.cloudName}/image/upload`,{method:'POST',body:fd});const j=await r.json();if(!r.ok||!cleanUrl(j.secure_url))throw Error(j.error?.message||'雲端上傳失敗');return j.secure_url}
 function openAdmin(){showAdminSection('list');listen(scoped('stores'),s=>{stores=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>a.name.localeCompare(b.name,'zh-Hant'));renderStores();renderStoreOptions()});listen(scoped('tasks'),s=>{tasks=s.docs.map(d=>({id:d.id,...d.data()}));renderAdminTasks()});listen(scoped('responses'),s=>{feedbackRows=s.docs.map(d=>d.data());renderAdminTasks();if(activeFeedbackTask)renderOverview(feedbackRows.filter(r=>r.taskId===activeFeedbackTask))})}
 async function addOwnedStore(name){
