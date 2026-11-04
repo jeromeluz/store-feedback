@@ -2,7 +2,7 @@ import {initializeApp} from 'https://www.gstatic.com/firebasejs/11.10.0/firebase
 import {getAuth,signInAnonymously,signInWithEmailAndPassword,signOut,onAuthStateChanged} from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js';
 import {getFirestore,collection,doc,getDoc,getDocs,setDoc,deleteDoc,onSnapshot,serverTimestamp,Timestamp,runTransaction,query,where} from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js';
 import {firebaseConfig,cloudinary} from './config.js';
-console.info('區組回饋平台 build 20261104-18');
+console.info('區組回饋平台 build 20261104-19');
 const app=initializeApp(firebaseConfig),auth=getAuth(app),db=getFirestore(app),$=id=>document.getElementById(id);
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const cleanUrl=u=>{try{const x=new URL(u);return x.protocol==='https:'&&x.hostname==='res.cloudinary.com'&&x.pathname.startsWith('/'+cloudinary.cloudName+'/')?x.href:''}catch{return ''}};
@@ -17,7 +17,7 @@ const todayLocal=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.g
 let sharedTaskOpened=false,taskSnapshotReady=false,responseSnapshotReady=false;
 let ownerId=null,store=null,admin=false,stores=[],tasks=[],answers={},editing=null,unsubs=[],saveTimers=new Map(),epoch=0,feedbackRows=[],activeFeedbackTask=null,activeResponseTask=null;
 const say=s=>$('status').textContent=s;
-const show=id=>{['login','storePage','adminLogin','adminPage'].forEach(k=>$(k).classList.toggle('hidden',k!==id));$('storeLogout').classList.toggle('hidden',id!=='storePage');};
+const show=id=>{['login','storePage','adminLogin','adminPage'].forEach(k=>$(k).classList.toggle('hidden',k!==id));$('storeLogout').classList.toggle('hidden',id!=='storePage');$('adminLogout').classList.toggle('hidden',id!=='adminPage');};
 const stop=()=>{unsubs.forEach(f=>f());unsubs=[];saveTimers.forEach(clearTimeout);saveTimers.clear();epoch++};
 const listen=(ref,fn)=>unsubs.push(onSnapshot(ref,fn,e=>say('讀取失敗：'+e.message)));
 const key=(s,t)=>s+'__'+t;
@@ -115,7 +115,22 @@ function renderStores(){$('storeList').innerHTML=stores.map(x=>`<div class="task
 }
 $('addStore').onclick=async()=>{try{const name=$('newStoreName').value.trim();if(!name)return;await addOwnedStore(name);$('newStoreName').value='';$('storeMessage').textContent='新增成功'}catch(e){$('storeMessage').textContent=e.message}};
 function renderOverview(rows){$('overview').innerHTML=rows.map(x=>`<div class="task"><strong>${esc(x.store)}</strong> ｜ ${esc(tasks.find(t=>t.id===x.taskId)?.title||x.taskId)} <span class="pill">${x.submitted?'已完成':'填寫中'}</span><p class="muted">上傳時間：${esc(timeText(x.updatedAt))}</p><div>${Object.entries(x.answers||{}).map(([id,v])=>{const q=tasks.find(t=>t.id===x.taskId)?.questions?.find(q=>q.id===id);return `<p class="break"><b>${esc(q?.label||id)}</b>：${cleanUrl(v)?`<button type="button" class="image-trigger photo-link" data-lightbox="${esc(cleanUrl(v))}">查看照片</button>`:esc(v)}</p>`}).join('')}</div></div>`).join('')||'<p class="muted">尚無回饋</p>'}
-function showAdminSection(which){clearTimeout(saveTimers.get('task'));saveTimers.delete('task');$('adminTaskList').classList.toggle('hidden',which!=='list');$('adminStores').classList.toggle('hidden',which!=='list');$('editor').classList.toggle('hidden',which!=='edit');$('taskFeedback').classList.toggle('hidden',which!=='feedback');if(which!=='edit')editing=null;if(which!=='feedback')activeFeedbackTask=null;window.scrollTo({top:0,behavior:'smooth'})}
+let adminArea='tasks';
+function showAdminSection(which){
+ clearTimeout(saveTimers.get('task'));saveTimers.delete('task');
+ if(which==='stores')adminArea='stores';else if(which==='list'||which==='edit'||which==='feedback')adminArea='tasks';
+ $('adminTaskList').classList.toggle('hidden',which!=='list');
+ $('adminStores').classList.toggle('hidden',which!=='stores');
+ $('editor').classList.toggle('hidden',which!=='edit');
+ $('taskFeedback').classList.toggle('hidden',which!=='feedback');
+ $('navTasks').classList.toggle('active',adminArea==='tasks');
+ $('navStores').classList.toggle('active',adminArea==='stores');
+ if(which!=='edit')editing=null;
+ if(which!=='feedback')activeFeedbackTask=null;
+ window.scrollTo({top:0,behavior:'smooth'});
+}
+$('navTasks').onclick=()=>showAdminSection('list');
+$('navStores').onclick=()=>showAdminSection('stores');
 function openTaskEditor(task){editing=structuredClone(task);showAdminSection('edit');renderEditor()}
 function openTaskFeedback(t){activeFeedbackTask=t.id;$('feedbackTitle').textContent='回饋查看｜'+t.title;showAdminSection('feedback');activeFeedbackTask=t.id;renderOverview(feedbackRows.filter(r=>r.taskId===t.id))}
 $('backAdminTasks').onclick=()=>showAdminSection('list');
@@ -123,13 +138,26 @@ $('backFromFeedback').onclick=()=>showAdminSection('list');
 function renderAdminTasks(){
  const selectedDate=$('adminDate').value;const ordered=sortedTasks(selectedDate?tasks.filter(t=>t.time===selectedDate):tasks,$('adminSort').value);
  const groups=[['進行中',ordered.filter(t=>!isDraft(t)&&!isExpired(t))],['暫存任務',ordered.filter(isDraft)],['已截止',ordered.filter(t=>!isDraft(t)&&isExpired(t))]];
- const card=t=>`<div class="task"><div class="task-summary"><div><strong>${esc(t.title)}</strong><p class="muted">任務日期 ${esc(t.time)} ｜ 截止 ${esc(t.deadline||'未設定')}</p></div><span class="pill">${isDraft(t)?'暫存':isExpired(t)?'已截止':feedbackRows.filter(r=>r.taskId===t.id).length+' 筆回饋'}</span></div><div class="task-actions"><button data-edit="${esc(t.id)}">編輯</button><button class="danger" data-delete-task="${esc(t.id)}">刪除</button><button class="secondary" data-feedback="${esc(t.id)}">回饋查看</button><button class="secondary" data-export="${esc(t.id)}">匯出 Excel</button>${!isDraft(t)?`<button class="secondary" data-share="${esc(t.id)}">分享網址</button>`:''}</div></div>`;
+ const card=t=>`<div class="task"><div class="task-summary"><div><strong>${esc(t.title)}</strong><p class="muted">任務日期 ${esc(t.time)} ｜ 截止 ${esc(t.deadline||'未設定')}</p></div><span class="pill">${isDraft(t)?'暫存':isExpired(t)?'已截止':feedbackRows.filter(r=>r.taskId===t.id).length+' 筆回饋'}</span></div><div class="task-actions"><button type="button" class="task-menu-toggle" aria-label="${esc(t.title)} 操作選單" aria-expanded="false" aria-haspopup="true">⋯</button><div class="task-menu" hidden><button data-edit="${esc(t.id)}">編輯任務</button><button data-duplicate="${esc(t.id)}">複製任務</button><button data-feedback="${esc(t.id)}">查看回饋</button><button data-export="${esc(t.id)}">匯出 Excel</button>${!isDraft(t)?`<button data-share="${esc(t.id)}">複製分享網址</button>`:''}<button class="danger" data-delete-task="${esc(t.id)}">刪除任務</button></div></div></div>`;
  $('adminTasks').innerHTML=groups.map(([name,items],i)=>`<details class="task-category" ${i===0?'open':''}><summary>${name}（${items.length}）</summary><div>${items.map(card).join('')||'<p class="muted">目前沒有任務</p>'}</div></details>`).join('');
+ $('adminTasks').querySelectorAll('.task-menu-toggle').forEach(b=>b.onclick=e=>{e.stopPropagation();const menu=b.nextElementSibling,open=menu.hidden;$('adminTasks').querySelectorAll('.task-menu').forEach(m=>{m.hidden=true;m.previousElementSibling.setAttribute('aria-expanded','false')});menu.hidden=!open;b.setAttribute('aria-expanded',String(open))});
+ $('adminTasks').querySelectorAll('[data-duplicate]').forEach(b=>b.onclick=()=>duplicateTask(tasks.find(t=>t.id===b.dataset.duplicate)));
  $('adminTasks').querySelectorAll('[data-share]').forEach(b=>b.onclick=async()=>{const url=new URL(baseUrl());url.searchParams.set('task',b.dataset.share);url.searchParams.set('group',ownerId);try{await navigator.clipboard.writeText(url.href);alert('已複製任務網址\n'+url.href)}catch{prompt('請複製此任務網址',url.href)}});
  $('adminTasks').querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openTaskEditor(tasks.find(t=>t.id===b.dataset.edit)));
  $('adminTasks').querySelectorAll('[data-feedback]').forEach(b=>b.onclick=()=>openTaskFeedback(tasks.find(t=>t.id===b.dataset.feedback)));
  $('adminTasks').querySelectorAll('[data-export]').forEach(b=>b.onclick=()=>exportTaskExcel(tasks.find(t=>t.id===b.dataset.export)));
  $('adminTasks').querySelectorAll('[data-delete-task]').forEach(b=>b.onclick=async()=>{const t=tasks.find(x=>x.id===b.dataset.deleteTask);if(!t||!confirm('確定刪除任務「'+t.title+'」？回饋紀錄會保留'))return;try{await deleteDoc(scoped('tasks',t.id))}catch(e){alert('刪除失敗：'+e.message)}});
+}
+document.addEventListener('click',e=>{if(!e.target.closest('.task-actions'))document.querySelectorAll('.task-menu').forEach(m=>{m.hidden=true;m.previousElementSibling?.setAttribute('aria-expanded','false')})});
+document.addEventListener('keydown',e=>{if(e.key==='Escape')document.querySelectorAll('.task-menu').forEach(m=>{m.hidden=true;m.previousElementSibling?.setAttribute('aria-expanded','false')})});
+function tomorrowEndLocal(){const d=new Date();d.setDate(d.getDate()+1);d.setHours(23,59,0,0);const z=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}T23:59`}
+function duplicateTask(t){
+ if(!t)return;
+ // 保留內容、題目、指定門市與參考照片，建立全新 ID，不帶入原回饋。
+ const copy=structuredClone(t);
+ editing={id:crypto.randomUUID(),title:copy.title,time:todayLocal(),description:copy.description||'',deadline:tomorrowEndLocal(),stores:[...(copy.stores||[])],references:[...(copy.references||[])],questions:(copy.questions||[]).map(q=>({...q,id:crypto.randomUUID()})),status:'published'};
+ showAdminSection('edit');renderEditor();
+ $('editorStatus').textContent='已套用複製內容，任務日期為今天，截止為明天 23:59。確認後按「儲存任務」建立新任務';
 }
 function exportTaskExcel(t){
  if(!t)return;
@@ -143,7 +171,7 @@ function exportTaskExcel(t){
  const filename=t.title.replace(/[\\/:*?"<>|]/g,'_').slice(0,55)||'任務';XLSX.writeFile(wb,`${filename}_回饋彙整.xlsx`);
 }
 
-$('newTask').onclick=()=>{editing={id:crypto.randomUUID(),title:'',time:todayLocal(),description:'',deadline:'',stores:[],references:[],questions:[],status:'draft'};showAdminSection('edit');renderEditor()};
+$('newTask').onclick=()=>{editing={id:crypto.randomUUID(),title:'',time:todayLocal(),description:'',deadline:tomorrowEndLocal(),stores:[],references:[],questions:[],status:'published'};showAdminSection('edit');renderEditor()};
 function renderStoreOptions() {if(!editing)return;$('taskStoreOptions').innerHTML=stores.map(s=>`<label style="display:inline-block;margin:7px"><input style="width:auto;display:inline" type="checkbox" data-store="${s.id}" ${(editing.stores||[]).includes(s.id)?'checked':''}> ${esc(s.name)}</label>`).join('');$('taskStoreOptions').querySelectorAll('[data-store]').forEach(el=>el.onchange=()=>{editing.stores=[...$('taskStoreOptions').querySelectorAll('[data-store]:checked')].map(x=>x.dataset.store);queueTask()})}
 function renderEditor(){if(!editing)return;$('editor').classList.remove('hidden');for(const [id,field] of [['taskTitle','title'],['taskTime','time'],['taskDesc','description'],['taskDeadline','deadline']])$(id).value=editing[field]||'';$('taskStatus').value=editing.status||'published';renderStoreOptions();renderReferences();renderQuestions();$('editorStatus').textContent=validateTask(editing)?'請填寫全部必填欄位，完成後自動儲存':'修改後自動儲存'}
 for(const [id,field] of [['taskTitle','title'],['taskTime','time'],['taskDesc','description'],['taskDeadline','deadline']])$(id).oninput=()=>{if(!editing)return;editing[field]=$(id).value;queueTask()};
