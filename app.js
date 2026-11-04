@@ -2,7 +2,7 @@ import {initializeApp} from 'https://www.gstatic.com/firebasejs/11.10.0/firebase
 import {getAuth,signInAnonymously,signInWithEmailAndPassword,signOut,onAuthStateChanged} from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js';
 import {getFirestore,collection,doc,getDoc,getDocs,setDoc,deleteDoc,onSnapshot,serverTimestamp,Timestamp,runTransaction,query,where} from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js';
 import {firebaseConfig,cloudinary} from './config.js';
-console.info('區組回饋平台 build 20261104-20');
+console.info('區組回饋平台 build 20261104-22');
 const app=initializeApp(firebaseConfig),auth=getAuth(app),db=getFirestore(app),$=id=>document.getElementById(id);
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const cleanUrl=u=>{try{const x=new URL(u);return x.protocol==='https:'&&x.hostname==='res.cloudinary.com'&&x.pathname.startsWith('/'+cloudinary.cloudName+'/')?x.href:''}catch{return ''}};
@@ -24,19 +24,35 @@ const listen=(ref,fn)=>unsubs.push(onSnapshot(ref,fn,e=>say('讀取失敗：'+e.
 const key=(s,t)=>s+'__'+t;
 const scoped=(type,id)=>id?doc(db,'groups',ownerId,type,id):collection(db,'groups',ownerId,type);
 const directoryId=name=>encodeURIComponent(name.normalize('NFC').trim());
+const codeRef=code=>doc(db,'storeCodes',String(code).trim());
+let catalog=[];
+async function loadCatalog(){if(catalog.length)return catalog;const response=await fetch('./store-catalog.json?build=20261104-22');if(!response.ok)throw Error('門市名冊載入失敗');catalog=await response.json();return catalog;}
+const catalogByCode=code=>catalog.find(x=>x.code===String(code));
+const displayStore=s=>s.code?`${s.name}(${s.code})`:s.name;
+
 async function anonymous(){if(!auth.currentUser||!auth.currentUser.isAnonymous){await signOut(auth);await signInAnonymously(auth)}}
 async function logout(){setTaskUrl(null);sharedTaskId=null;stop();store=null;ownerId=null;admin=false;localStorage.removeItem('storeName');await signOut(auth);show('login');say('請登入')}
 $('storeLogout').onclick=logout;$('adminLogout').onclick=logout;$('backLogin').onclick=()=>{location.href=baseUrl()};
 async function enterStore(name){
  stop();sharedTaskOpened=false;taskSnapshotReady=false;responseSnapshotReady=false;answers={};tasks=[];
  await anonymous();
- const dir=await getDoc(doc(db,'storeDirectory',directoryId(name)));
- if(!dir.exists()||!dir.data().enabled)throw Error('找不到此門市或門市已停用');
- ownerId=dir.data().ownerId;const linkGroup=new URLSearchParams(location.search).get('group');if(sharedTaskId&&linkGroup&&linkGroup!==ownerId)throw Error('此分享任務不屬於這間門市');
- const snap=await getDoc(scoped('stores',dir.data().storeId));
- if(!snap.exists()||!snap.data().enabled||snap.data().name!==name)throw Error('門市資料無效，請聯絡管理員');
- store={id:snap.id,...snap.data()};admin=false;localStorage.setItem('storeName',name);
- show('storePage');$('storeSort').parentElement.classList.remove('hidden');$('storeBack').classList.add('hidden');$('storeTitle').textContent=name+'｜回饋任務';activeResponseTask=null;$('tasks').classList.remove('hidden');$('response').classList.add('hidden');
+ const input=name.trim();
+ let match;
+ if(/^\d+$/.test(input)){
+  const code=await getDoc(codeRef(input));
+  if(!code.exists()||!code.data().enabled)throw Error('找不到此店號或門市已停用');
+  match=code.data();
+ }else{
+  const dir=await getDoc(doc(db,'storeDirectory',directoryId(input)));
+  if(!dir.exists()||!dir.data().enabled)throw Error('找不到此門市或門市已停用，請確認名稱或輸入店號');
+  match=dir.data();
+  if(match.ambiguous){await chooseSameNameStore(input);return;}
+ }
+ ownerId=match.ownerId;const linkGroup=new URLSearchParams(location.search).get('group');if(sharedTaskId&&linkGroup&&linkGroup!==ownerId)throw Error('此分享任務不屬於這間門市');
+ const snap=await getDoc(scoped('stores',match.storeId));
+ if(!snap.exists()||!snap.data().enabled||snap.data().name!==match.name)throw Error('門市資料無效，請聯絡管理員');
+ store={id:snap.id,...snap.data()};admin=false;localStorage.setItem('storeName',store.code||store.name);
+ show('storePage');$('storeSort').parentElement.classList.remove('hidden');$('storeBack').classList.add('hidden');$('storeTitle').textContent=displayStore(store)+'｜回饋任務';activeResponseTask=null;$('tasks').classList.remove('hidden');$('response').classList.add('hidden');
  listen(query(scoped('tasks'),where('status','==','published')),s=>{tasks=s.docs.map(d=>({id:d.id,...d.data()}));taskSnapshotReady=true;renderStoreTasks();openSharedTaskIfReady()});
  listen(scoped('responses'),s=>{answers={};s.docs.forEach(d=>{const v=d.data();if(v.storeId===store.id)answers[v.taskId]=v});responseSnapshotReady=true;renderStoreTasks();openSharedTaskIfReady()});say('已連線')
 }
@@ -49,6 +65,27 @@ function openSharedTaskIfReady(){
  }
  sharedTaskOpened=true;openResponse(t);
 }
+// 同名門市先依區課確認，再用店號完成既有登入及權限檢查。
+async function chooseSameNameStore(name){
+ await loadCatalog();
+ const matches=catalog.filter(x=>x.name.normalize('NFC').trim()===name.normalize('NFC').trim());
+ if(!matches.length)throw Error('找不到同名門市資料，請改用店號登入');
+ const dialog=$('duplicateStorePicker'),options=$('duplicateStoreOptions');
+ $('duplicateStoreName').textContent=name;
+ $('duplicateStoreError').textContent='';
+ options.innerHTML=matches.map(x=>`<button type="button" class="picker-option" data-store-code="${esc(x.code)}">${esc(x.area)}　｜　${esc(x.name)} (${esc(x.code)})</button>`).join('');
+ options.querySelectorAll('button').forEach(button=>button.onclick=async()=>{
+  options.querySelectorAll('button').forEach(b=>b.disabled=true);
+  try{
+   // 先驗證店號是否已由管理員加入，避免將其他區組門市登入成功。
+   await enterStore(button.dataset.storeCode);
+   dialog.close();
+  }catch(e){$('duplicateStoreError').textContent=e.message;options.querySelectorAll('button').forEach(b=>b.disabled=false)}
+ });
+ dialog.showModal();
+}
+$('closeDuplicateStorePicker').onclick=()=>$('duplicateStorePicker').close();
+$('duplicateStorePicker').addEventListener('click',e=>{if(e.target===$('duplicateStorePicker'))$('duplicateStorePicker').close()});
 $('storeLoginForm').addEventListener('submit',e=>{e.preventDefault();$('enter').click()});
 $('adminLoginForm').addEventListener('submit',e=>{e.preventDefault();$('adminSignIn').click()});
 $('enter').onclick=async()=>{try{$('loginError').textContent='';await enterStore($('storeName').value.trim())}catch(e){$('loginError').textContent=e.message}};
@@ -103,29 +140,50 @@ async function persistResponse(t,v,forceSubmit=false){
 }
 async function upload(file){if(!['image/jpeg','image/png','image/webp'].includes(file.type))throw Error('僅接受 JPG PNG WebP');if(file.size>2*1024*1024)throw Error('照片不得超過 2 MB');const fd=new FormData();fd.append('file',file);fd.append('upload_preset',cloudinary.uploadPreset);const r=await fetch(`https://api.cloudinary.com/v1_1/${cloudinary.cloudName}/image/upload`,{method:'POST',body:fd});const j=await r.json();if(!r.ok||!cleanUrl(j.secure_url))throw Error(j.error?.message||'雲端上傳失敗');return j.secure_url}
 function openAdmin(){showAdminSection('list');listen(scoped('stores'),s=>{stores=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>a.name.localeCompare(b.name,'zh-Hant'));renderStores();renderStoreOptions()});listen(scoped('tasks'),s=>{tasks=s.docs.map(d=>({id:d.id,...d.data()}));renderAdminTasks()});listen(scoped('responses'),s=>{feedbackRows=s.docs.map(d=>d.data());renderAdminTasks();if(activeFeedbackTask)renderOverview(feedbackRows.filter(r=>r.taskId===activeFeedbackTask))})}
-async function addOwnedStore(name){
- const id=crypto.randomUUID(),ref=doc(db,'storeDirectory',directoryId(name)),storeRef=scoped('stores',id);
- await runTransaction(db,async tx=>{const old=await tx.get(ref);if(old.exists())throw Error('此門市名稱已由其他區組使用');tx.set(ref,{ownerId,storeId:id,name,enabled:true});tx.set(storeRef,{name,ownerId,enabled:true,createdAt:serverTimestamp()})});
+async function addOwnedStore(entry){
+ const {name,code,area}=entry;
+ const id=crypto.randomUUID(),ref=doc(db,'storeDirectory',directoryId(name)),codeDoc=codeRef(code),storeRef=scoped('stores',id);
+ // 同名門市可以分別加入，店號是唯一識別；同名登入只在唯一時有效。
+ await runTransaction(db,async tx=>{
+  const old=await tx.get(ref),existingCode=await tx.get(codeDoc);
+  if(existingCode.exists())throw Error('此店號已被其他區組新增');
+  const nameData={ownerId,storeId:id,name,enabled:true};
+  if(old.exists()){
+   if(old.data().ownerId===ownerId && old.data().ambiguous!==true){tx.update(ref,{ambiguous:true});}
+  }else tx.set(ref,nameData);
+  tx.set(codeDoc,{...nameData,code,area});
+  tx.set(storeRef,{...nameData,code,area,createdAt:serverTimestamp()});
+ });
 }
 async function renameOwnedStore(s,name){
  const oldRef=doc(db,'storeDirectory',directoryId(s.name)),newRef=doc(db,'storeDirectory',directoryId(name));
  await runTransaction(db,async tx=>{const old=await tx.get(oldRef),next=await tx.get(newRef);if(!old.exists()||old.data().ownerId!==ownerId||old.data().storeId!==s.id)throw Error('原門市對照資料不正確');if(next.exists())throw Error('此門市名稱已被使用');tx.delete(oldRef);tx.set(newRef,{ownerId,storeId:s.id,name,enabled:s.enabled});tx.update(scoped('stores',s.id),{name})});
 }
 async function toggleOwnedStore(s){
- const ref=doc(db,'storeDirectory',directoryId(s.name));
+ const ref=s.code?codeRef(s.code):doc(db,'storeDirectory',directoryId(s.name));
  await runTransaction(db,async tx=>{const d=await tx.get(ref);if(!d.exists()||d.data().ownerId!==ownerId||d.data().storeId!==s.id)throw Error('門市對照資料不正確');tx.update(ref,{enabled:!s.enabled});tx.update(scoped('stores',s.id),{enabled:!s.enabled})});
 }
 async function deleteOwnedStore(s){
- const ref=doc(db,'storeDirectory',directoryId(s.name));
+ const ref=s.code?codeRef(s.code):doc(db,'storeDirectory',directoryId(s.name));
  await runTransaction(db,async tx=>{const d=await tx.get(ref);if(!d.exists()||d.data().ownerId!==ownerId||d.data().storeId!==s.id)throw Error('門市對照資料不正確');tx.delete(ref);tx.delete(scoped('stores',s.id))});
 }
-function renderStores(){$('storeList').innerHTML=stores.map(x=>`<div class="task"><strong>${esc(x.name)}</strong> <span class="pill">${x.enabled?'啟用':'停用'}</span><div><button data-rename="${x.id}" class="secondary">改名</button><button data-toggle="${x.id}" class="secondary">${x.enabled?'停用':'啟用'}</button><button data-delete="${x.id}" class="danger">刪除</button></div></div>`).join('')||'<p>尚無門市</p>';
- $('storeList').querySelectorAll('[data-rename]').forEach(b=>b.onclick=async()=>{const s=stores.find(x=>x.id===b.dataset.rename),name=prompt('門市名稱',s.name)?.trim();if(!name||name===s.name)return;try{await renameOwnedStore(s,name)}catch(e){alert('改名失敗：'+e.message)}});
+function renderStores(){
+ $('storeList').innerHTML=stores.map(x=>`<div class="task"><strong>${esc(displayStore(x))}</strong> <span class="pill">${x.enabled?'啟用':'停用'}</span><div class="store-detail">${esc(x.area||'舊門市資料')}</div><div>${!x.code?`<button data-rename="${x.id}" class="secondary">改名</button>`:''}<button data-toggle="${x.id}" class="secondary">${x.enabled?'停用':'啟用'}</button><button data-delete="${x.id}" class="danger">刪除</button></div></div>`).join('')||'<p>尚無門市</p>';
+ $('storeList').querySelectorAll('[data-rename]').forEach(b=>b.onclick=async()=>{const x=stores.find(z=>z.id===b.dataset.rename),name=prompt('門市名稱',x.name)?.trim();if(!name||name===x.name)return;try{await renameOwnedStore(x,name)}catch(e){alert('改名失敗：'+e.message)}});
  $('storeList').querySelectorAll('[data-toggle]').forEach(b=>b.onclick=async()=>{try{await toggleOwnedStore(stores.find(x=>x.id===b.dataset.toggle))}catch(e){alert(e.message)}});
- $('storeList').querySelectorAll('[data-delete]').forEach(b=>b.onclick=async()=>{const s=stores.find(x=>x.id===b.dataset.delete);if(confirm('確定刪除 '+s.name+'？原回饋紀錄保留'))try{await deleteOwnedStore(s)}catch(e){alert(e.message)}});
+ $('storeList').querySelectorAll('[data-delete]').forEach(b=>b.onclick=async()=>{const x=stores.find(z=>z.id===b.dataset.delete);if(confirm('確定刪除 '+displayStore(x)+'？原回饋紀錄保留'))try{await deleteOwnedStore(x)}catch(e){alert(e.message)}});
 }
-$('addStore').onclick=async()=>{try{const name=$('newStoreName').value.trim();if(!name)return;await addOwnedStore(name);$('newStoreName').value='';$('storeMessage').textContent='新增成功'}catch(e){$('storeMessage').textContent=e.message}};
-function renderOverview(rows){$('overview').innerHTML=rows.map(x=>`<div class="task"><strong>${esc(x.store)}</strong> ｜ ${esc(tasks.find(t=>t.id===x.taskId)?.title||x.taskId)} <span class="pill">${x.submitted?'已完成':'填寫中'}</span><p class="muted">上傳時間：${esc(timeText(x.updatedAt))}</p><div>${Object.entries(x.answers||{}).map(([id,v])=>{const q=tasks.find(t=>t.id===x.taskId)?.questions?.find(q=>q.id===id);return `<p class="break"><b>${esc(q?.label||id)}</b>：${cleanUrl(v)?`<button type="button" class="image-trigger photo-link" data-lightbox="${esc(cleanUrl(v))}">查看照片</button>`:esc(v)}</p>`}).join('')}</div></div>`).join('')||'<p class="muted">尚無回饋</p>'}
+function renderPicker(){
+ const area=$('pickerArea').value,search=$('pickerSearch').value.trim().toLowerCase();
+ const filtered=catalog.filter(x=>x.area===area&&(!search||x.name.toLowerCase().includes(search)||x.code.includes(search)));
+ $('pickerOptions').innerHTML=filtered.map(x=>{const used=stores.some(s=>s.code===x.code);return `<button type="button" class="picker-option" data-code="${esc(x.code)}" ${used?'disabled':''}>${esc(x.name)} (${esc(x.code)})${used?' · 已新增':''}</button>`}).join('')||'<p class="muted">請選擇區課，或沒有符合的門市</p>';
+ $('pickerOptions').querySelectorAll('[data-code]').forEach(btn=>btn.onclick=async()=>{const x=catalogByCode(btn.dataset.code);if(!x)return;btn.disabled=true;$('pickerMessage').textContent='新增中…';try{await addOwnedStore(x);$('pickerMessage').textContent='已新增 '+displayStore(x);$('storeMessage').textContent='新增成功：'+displayStore(x);$('storePicker').close()}catch(e){$('pickerMessage').textContent='新增失敗：'+e.message;btn.disabled=false}});
+}
+$('addStore').onclick=async()=>{try{await loadCatalog();const areas=[...new Set(catalog.map(x=>x.area))].sort((a,b)=>a.localeCompare(b,'zh-Hant'));$('pickerArea').innerHTML='<option value="">請選擇區課</option>'+areas.map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join('');$('pickerSearch').value='';$('pickerMessage').textContent='';renderPicker();$('storePicker').showModal()}catch(e){$('storeMessage').textContent=e.message}};
+$('closeStorePicker').onclick=()=>$('storePicker').close();
+$('pickerArea').onchange=renderPicker;
+$('pickerSearch').oninput=renderPicker;
+function renderOverview(rows){$('overview').innerHTML=rows.map(x=>`<div class="task"><strong>${esc(displayStore(stores.find(s=>s.id===x.storeId)||{name:x.store}))}</strong> ｜ ${esc(tasks.find(t=>t.id===x.taskId)?.title||x.taskId)} <span class="pill">${x.submitted?'已完成':'填寫中'}</span><p class="muted">上傳時間：${esc(timeText(x.updatedAt))}</p><div>${Object.entries(x.answers||{}).map(([id,v])=>{const q=tasks.find(t=>t.id===x.taskId)?.questions?.find(q=>q.id===id);return `<p class="break"><b>${esc(q?.label||id)}</b>：${cleanUrl(v)?`<button type="button" class="image-trigger photo-link" data-lightbox="${esc(cleanUrl(v))}">查看照片</button>`:esc(v)}</p>`}).join('')}</div></div>`).join('')||'<p class="muted">尚無回饋</p>'}
 let adminArea='tasks';
 function showAdminSection(which){
  clearTimeout(saveTimers.get('task'));saveTimers.delete('task');
@@ -174,7 +232,7 @@ function exportTaskExcel(t){
  if(!t)return;
  if(typeof XLSX==='undefined'){alert('Excel 匯出元件尚未載入，請確認網路連線後重新整理');return}
  const qs=t.questions||[];
- const rows=feedbackRows.filter(r=>r.taskId===t.id).map(r=>{const row={'任務名稱':t.title,'任務日期':t.time,'截止日期':t.deadline,'門市':r.store||stores.find(s=>s.id===r.storeId)?.name||r.storeId,'狀態':r.submitted?'已完成':'填寫中','上傳時間':timeText(r.updatedAt)};qs.forEach((q,i)=>row[`${i+1}. ${q.label}`]=r.answers?.[q.id]||'');return row});
+ const rows=feedbackRows.filter(r=>r.taskId===t.id).map(r=>{const row={'任務名稱':t.title,'任務日期':t.time,'截止日期':t.deadline,'門市':displayStore(stores.find(s=>s.id===r.storeId)||{name:r.store||r.storeId}),'狀態':r.submitted?'已完成':'填寫中','上傳時間':timeText(r.updatedAt)};qs.forEach((q,i)=>row[`${i+1}. ${q.label}`]=r.answers?.[q.id]||'');return row});
  const headers=['任務名稱','任務日期','截止日期','門市','狀態','上傳時間',...qs.map((q,i)=>`${i+1}. ${q.label}`)];
  const ws=XLSX.utils.json_to_sheet(rows,{header:headers});if(!rows.length)XLSX.utils.sheet_add_aoa(ws,[headers],{origin:'A1'});
  ws['!cols']=headers.map((h,i)=>({wch:i<6?20:36}));
@@ -183,7 +241,7 @@ function exportTaskExcel(t){
 }
 
 $('newTask').onclick=()=>{editing={id:crypto.randomUUID(),title:'',time:todayLocal(),description:'',deadline:tomorrowEndLocal(),stores:[],references:[],questions:[],status:'published'};showAdminSection('edit');renderEditor()};
-function renderStoreOptions() {if(!editing)return;$('taskStoreOptions').innerHTML=stores.map(s=>`<label style="display:inline-block;margin:7px"><input style="width:auto;display:inline" type="checkbox" data-store="${s.id}" ${(editing.stores||[]).includes(s.id)?'checked':''}> ${esc(s.name)}</label>`).join('');$('taskStoreOptions').querySelectorAll('[data-store]').forEach(el=>el.onchange=()=>{editing.stores=[...$('taskStoreOptions').querySelectorAll('[data-store]:checked')].map(x=>x.dataset.store);queueTask()})}
+function renderStoreOptions() {if(!editing)return;$('taskStoreOptions').innerHTML=stores.map(s=>`<label style="display:inline-block;margin:7px"><input style="width:auto;display:inline" type="checkbox" data-store="${s.id}" ${(editing.stores||[]).includes(s.id)?'checked':''}> ${esc(displayStore(s))}</label>`).join('');$('taskStoreOptions').querySelectorAll('[data-store]').forEach(el=>el.onchange=()=>{editing.stores=[...$('taskStoreOptions').querySelectorAll('[data-store]:checked')].map(x=>x.dataset.store);queueTask()})}
 function renderEditor(){if(!editing)return;$('editor').classList.remove('hidden');for(const [id,field] of [['taskTitle','title'],['taskTime','time'],['taskDesc','description'],['taskDeadline','deadline']])$(id).value=editing[field]||'';$('taskStatus').value=editing.status||'published';renderStoreOptions();renderReferences();renderQuestions();$('editorStatus').textContent=validateTask(editing)?'請填寫全部必填欄位，完成後自動儲存':'修改後自動儲存'}
 for(const [id,field] of [['taskTitle','title'],['taskTime','time'],['taskDesc','description'],['taskDeadline','deadline']])$(id).oninput=()=>{if(!editing)return;editing[field]=$(id).value;queueTask()};
 $('taskStatus').onchange=()=>{if(!editing)return;editing.status=$('taskStatus').value;queueTask()};

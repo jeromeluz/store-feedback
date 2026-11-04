@@ -15,8 +15,15 @@ service cloud.firestore {
   match /storeDirectory/{name} {
    allow get: if guest() || manager();
    allow list: if false;
-   allow create: if manager() && request.resource.data.keys().hasOnly(['ownerId','storeId','name','enabled']) && request.resource.data.ownerId == request.auth.uid && request.resource.data.storeId is string && request.resource.data.enabled == true;
-   allow update: if manager() && resource.data.ownerId == request.auth.uid && request.resource.data.ownerId == request.auth.uid && request.resource.data.storeId == resource.data.storeId && request.resource.data.name == resource.data.name && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['enabled']);
+   allow create: if manager() && request.resource.data.keys().hasOnly(['ownerId','storeId','name','enabled','ambiguous']) && request.resource.data.ownerId == request.auth.uid && request.resource.data.storeId is string && request.resource.data.enabled == true;
+   allow update: if manager() && resource.data.ownerId == request.auth.uid && request.resource.data.ownerId == request.auth.uid && request.resource.data.storeId == resource.data.storeId && request.resource.data.name == resource.data.name && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['enabled','ambiguous']);
+   allow delete: if manager() && resource.data.ownerId == request.auth.uid;
+  }
+  match /storeCodes/{code} {
+   allow get: if guest() || manager();
+   allow list: if false;
+   allow create: if manager() && request.resource.data.ownerId == request.auth.uid && request.resource.data.storeId is string && request.resource.data.name is string && request.resource.data.code == code && request.resource.data.area is string && request.resource.data.enabled == true;
+   allow update: if manager() && resource.data.ownerId == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['enabled']);
    allow delete: if manager() && resource.data.ownerId == request.auth.uid;
   }
   match /groups/{uid}/stores/{sid} {
