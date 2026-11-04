@@ -4,18 +4,42 @@ service cloud.firestore {
   function signed() { return request.auth != null; }
   function manager() { return signed() && request.auth.token.firebase.sign_in_provider == 'password' && exists(/databases/$(database)/documents/admins/$(request.auth.uid)) && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.enabled == true; }
   function guest() { return signed() && request.auth.token.firebase.sign_in_provider == 'anonymous'; }
-  function validStore(id) { return exists(/databases/$(database)/documents/stores/$(id)) && get(/databases/$(database)/documents/stores/$(id)).data.enabled == true; }
-  function validTask(s,t) { return exists(/databases/$(database)/documents/tasks/$(t)) && get(/databases/$(database)/documents/tasks/$(t)).data.get('status', 'published') == 'published' && (get(/databases/$(database)/documents/tasks/$(t)).data.stores.size() == 0 || s in get(/databases/$(database)/documents/tasks/$(t)).data.stores) && (get(/databases/$(database)/documents/tasks/$(t)).data.deadlineAt == null || request.time < get(/databases/$(database)/documents/tasks/$(t)).data.deadlineAt); }
-  function validResponse(id,d) { return guest() && d.keys().hasOnly(['storeId','store','taskId','answers','submitted','updatedAt']) && d.storeId is string && d.taskId is string && d.store is string && d.answers is map && d.answers.size() <= 80 && d.store == get(/databases/$(database)/documents/stores/$(d.storeId)).data.name && id == d.storeId + '__' + d.taskId && validStore(d.storeId) && validTask(d.storeId,d.taskId) && d.updatedAt == request.time; }
-  match /admins/{id} { allow get: if signed() && request.auth.uid == id; allow list,write: if false; }
-  match /stores/{id} { allow read: if manager() || guest(); allow write: if manager(); }
-  match /tasks/{id} { allow get,list: if manager() || (guest() && resource.data.get('status', 'published') == 'published'); allow write: if manager(); }
-  match /responses/{id} {
-   // Name-only access is NOT identity verification. Anonymous users can read other stores' answers.
-   allow read: if manager() || guest();
-   allow create: if validResponse(id,request.resource.data);
-   allow update: if validResponse(id,request.resource.data) && request.resource.data.storeId == resource.data.storeId && request.resource.data.taskId == resource.data.taskId && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['answers','submitted','updatedAt']);
-   allow delete: if manager();
+  function owns(uid) { return manager() && request.auth.uid == uid; }
+  function storePath(uid,sid) { return /databases/$(database)/documents/groups/$(uid)/stores/$(sid); }
+  function taskPath(uid,tid) { return /databases/$(database)/documents/groups/$(uid)/tasks/$(tid); }
+  function directoryPath(name) { return /databases/$(database)/documents/storeDirectory/$(name); }
+  function validStore(uid,sid) { return exists(storePath(uid,sid)) && get(storePath(uid,sid)).data.enabled == true; }
+  function validTask(uid,sid,tid) { return exists(taskPath(uid,tid)) && get(taskPath(uid,tid)).data.get('status','published') == 'published' && (get(taskPath(uid,tid)).data.stores.size() == 0 || sid in get(taskPath(uid,tid)).data.stores) && (get(taskPath(uid,tid)).data.deadlineAt == null || request.time < get(taskPath(uid,tid)).data.deadlineAt); }
+  function responseOK(uid,id,d) { return guest() && d.keys().hasOnly(['ownerId','storeId','store','taskId','answers','submitted','updatedAt']) && d.ownerId == uid && d.storeId is string && d.taskId is string && d.store is string && d.answers is map && d.answers.size() <= 80 && id == d.storeId + '__' + d.taskId && validStore(uid,d.storeId) && d.store == get(storePath(uid,d.storeId)).data.name && validTask(uid,d.storeId,d.taskId) && d.updatedAt == request.time; }
+  match /admins/{uid} { allow get: if signed() && request.auth.uid == uid; allow list,write: if false; }
+  match /storeDirectory/{name} {
+   allow get: if guest() || manager();
+   allow list: if false;
+   allow create: if manager() && request.resource.data.keys().hasOnly(['ownerId','storeId','name','enabled']) && request.resource.data.ownerId == request.auth.uid && request.resource.data.storeId is string && request.resource.data.enabled == true;
+   allow update: if manager() && resource.data.ownerId == request.auth.uid && request.resource.data.ownerId == request.auth.uid && request.resource.data.storeId == resource.data.storeId && request.resource.data.name == resource.data.name && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['enabled']);
+   allow delete: if manager() && resource.data.ownerId == request.auth.uid;
   }
+  match /groups/{uid}/stores/{sid} {
+   allow get: if owns(uid) || guest();
+   allow list: if owns(uid);
+   allow create: if owns(uid) && request.resource.data.ownerId == uid && request.resource.data.name is string && request.resource.data.enabled is bool;
+   allow update: if owns(uid) && request.resource.data.ownerId == uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name','enabled']);
+   allow delete: if owns(uid);
+  }
+  match /groups/{uid}/tasks/{tid} {
+   allow get,list: if owns(uid) || (guest() && resource.data.get('status','published') == 'published');
+   allow create,update: if owns(uid) && request.resource.data.ownerId == uid;
+   allow delete: if owns(uid);
+  }
+  match /groups/{uid}/responses/{rid} {
+   allow get,list: if owns(uid) || guest();
+   allow create: if responseOK(uid,rid,request.resource.data);
+   allow update: if responseOK(uid,rid,request.resource.data) && resource.data.ownerId == uid && resource.data.storeId == request.resource.data.storeId && resource.data.taskId == request.resource.data.taskId && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['answers','submitted','updatedAt']);
+   allow delete: if owns(uid);
+  }
+  // 舊版根目錄資料保留供備份，但不再由新版網頁讀取。
+  match /stores/{id} { allow read,write: if false; }
+  match /tasks/{id} { allow read,write: if false; }
+  match /responses/{id} { allow read,write: if false; }
  }
 }

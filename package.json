@@ -1,0 +1,11 @@
+{
+  "name": "store-feedback-migration",
+  "private": true,
+  "scripts": {
+    "migrate:check": "node migrate-legacy.cjs",
+    "migrate:apply": "node migrate-legacy.cjs --apply"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.0.0"
+  }
+}

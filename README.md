@@ -1,27 +1,28 @@
-# 區組回饋平台 V13 部署說明
+# 區組回饋平台 V16｜V14 舊資料歸戶移轉包
 
-更新項目
-- 門市端：進行中任務與可展開的已截止任務分開。已截止任務只讀不可修改。
-- 管理者端：進行中、暫存、已截止三類任務。新任務預設為暫存；可在編輯頁改為發布。暫存可以儲存尚未完成的題目，發布前必須填妥必填欄位。
-- 管理者在「回饋查看」看到每筆回饋的「上傳時間」，採 Firestore updatedAt，即最後一次成功儲存的時間，並非首次上傳時間。門市端不顯示。
-- 任務列表新增「匯出 Excel」，將指定任務的所有門市回饋輸出 XLSX，每題一欄，含上傳時間與照片連結。Excel 匯出需能載入 SheetJS CDN。
+目標管理員：`jonny00520@gmail.com`。此版本沿用 V15 的多管理員網頁與 Firestore 規則，新增一次性移轉工具。
 
-## 部署
-1. 將 index.html、app.js 更新到 GitHub Pages 專案根目錄，config.js 沿用原設定。
-2. **重要：** Firebase Console → Firestore Database → 規則，使用此包中的 firestore.rules 完整取代並發布。新增的規則讓匿名門市看不到暫存任務；原有規則會暴露暫存任務。
-3. 在 GitHub Actions 確認 Pages 已部署，重新整理頁面。
-4. 建立暫存任務 → 檢查門市端不可見 → 改成發布 → 門市端可見；到期後應歸類已截止。
-5. 以管理員回饋查看與匯出 Excel 驗證時間及資料。
+## 重要：先移轉再上線
+
+1. 暫停門市填寫和管理員編輯，避免移轉期間產生新資料。
+2. 在電腦安裝 Node.js（建議 20 以上）。從 Firebase Console > 專案設定 > 服務帳戶產生**私密金鑰 JSON**，存放在自己電腦，不要上傳 GitHub，也不要傳給別人。
+3. 在此專案資料夾執行 `npm install`。
+4. 設定 `GOOGLE_APPLICATION_CREDENTIALS` 環境變數，指向剛下載的 JSON：
+   - Windows PowerShell：`$env:GOOGLE_APPLICATION_CREDENTIALS="C:\\安全資料夾\\service-account.json"`
+   - macOS/Linux：`export GOOGLE_APPLICATION_CREDENTIALS="/安全資料夾/service-account.json"`
+5. 先執行 `npm run migrate:check`，檢查資料與建立本機備份，不會寫入 Firestore。
+6. 確認數量正確且沒有衝突後執行 `npm run migrate:apply`。會移轉根集合 `stores`、`tasks`、`responses`，建立 `storeDirectory`，並把舊任務缺少的 `status` 設為 `published`。
+7. 出現「移轉完成且數量驗證通過」後，至 Firebase Console 發布這份 `firestore.rules`，再把 `index.html`、`app.js`、`config.js` 上傳 GitHub Pages。
+8. 使用指定管理員登入，核對門市、任務、回饋及 Excel 匯出，然後再讓門市恢復使用。
+
+## 保留資料
+
+- 原本文件 ID 不變，照片網址、回饋答案、`updatedAt` 時間戳記照原值複製。
+- 舊根集合不會刪除。
+- 每次檢查或正式執行都會在 `migration-backup/` 產生本機 JSON 備份（此資料夾不要上傳 GitHub）。
+- 若目標已有同 ID 文件或門市名稱對照，程式會停止，避免覆蓋。
+- 若正式移轉中斷，可能已有部分文件建立，請不要直接重跑，先檢查已寫入的資料。
 
 ## 注意
-- 舊任務沒有 status 欄位，為了相容會視為已發布。
-- 既有回饋 updatedAt 欄位若不存在會顯示尚未上傳。
-- 截止分類依任務的 deadlineAt（Firebase timestamp）判斷，頁面開啟期間如剛好跨過截止時間，請重新整理以更新分類。
-- 門市免密碼登入及匿名讀取回饋仍存在原系統的資料保護限制，不適合機密資料。
-- 免費額度仍依 Firebase Spark、Cloudinary Free 及 GitHub Pages 各自限制。
-- 此版通過 JavaScript 語法檢查，未在實際 Firebase 環境完成端到端測試。
 
-
-## 圖片燈箱更新
-
-參考照片、已上傳照片及管理者回饋照片改為原頁面放大預覽，可點右上角 ×、背景或按 Esc 關閉。請同步更新 `index.html` 與 `app.js`，無須修改 Firestore 規則。
+目前沒有你的 Firebase 管理員憑證，因此無法代替你在正式資料庫執行移轉。這個 ZIP 是可在你電腦執行的工具與 V15 網頁程式，不代表線上資料已移轉。
