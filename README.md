@@ -20,3 +20,8 @@
 - 門市免密碼登入及匿名讀取回饋仍存在原系統的資料保護限制，不適合機密資料。
 - 免費額度仍依 Firebase Spark、Cloudinary Free 及 GitHub Pages 各自限制。
 - 此版通過 JavaScript 語法檢查，未在實際 Firebase 環境完成端到端測試。
+
+
+## 圖片燈箱更新
+
+參考照片、已上傳照片及管理者回饋照片改為原頁面放大預覽，可點右上角 ×、背景或按 Esc 關閉。請同步更新 `index.html` 與 `app.js`，無須修改 Firestore 規則。
