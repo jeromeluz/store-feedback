@@ -2,7 +2,7 @@ import {initializeApp} from 'https://www.gstatic.com/firebasejs/11.10.0/firebase
 import {getAuth,signInAnonymously,signInWithEmailAndPassword,signOut,onAuthStateChanged} from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js';
 import {getFirestore,collection,doc,getDoc,getDocs,setDoc,deleteDoc,onSnapshot,serverTimestamp,Timestamp,runTransaction,query,where} from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js';
 import {firebaseConfig,cloudinary} from './config.js';
-console.info('區組回饋平台 build 20261104-17');
+console.info('區組回饋平台 build 20261104-18');
 const app=initializeApp(firebaseConfig),auth=getAuth(app),db=getFirestore(app),$=id=>document.getElementById(id);
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const cleanUrl=u=>{try{const x=new URL(u);return x.protocol==='https:'&&x.hostname==='res.cloudinary.com'&&x.pathname.startsWith('/'+cloudinary.cloudName+'/')?x.href:''}catch{return ''}};
@@ -17,7 +17,7 @@ const todayLocal=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.g
 let sharedTaskOpened=false,taskSnapshotReady=false,responseSnapshotReady=false;
 let ownerId=null,store=null,admin=false,stores=[],tasks=[],answers={},editing=null,unsubs=[],saveTimers=new Map(),epoch=0,feedbackRows=[],activeFeedbackTask=null,activeResponseTask=null;
 const say=s=>$('status').textContent=s;
-const show=id=>['login','storePage','adminLogin','adminPage'].forEach(k=>$(k).classList.toggle('hidden',k!==id));
+const show=id=>{['login','storePage','adminLogin','adminPage'].forEach(k=>$(k).classList.toggle('hidden',k!==id));$('storeLogout').classList.toggle('hidden',id!=='storePage');};
 const stop=()=>{unsubs.forEach(f=>f());unsubs=[];saveTimers.forEach(clearTimeout);saveTimers.clear();epoch++};
 const listen=(ref,fn)=>unsubs.push(onSnapshot(ref,fn,e=>say('讀取失敗：'+e.message)));
 const key=(s,t)=>s+'__'+t;
@@ -42,7 +42,7 @@ async function enterStore(name){
 function openSharedTaskIfReady(){
  if(!sharedTaskId||sharedTaskOpened||!store||!taskSnapshotReady||!responseSnapshotReady)return;
  const t=tasks.find(x=>x.id===sharedTaskId);
- if(!t||isDraft(t)||isExpired(t)){$('sharedTaskHint').textContent='此任務不存在、尚未發布或已截止，可進入門市查看其他任務';return;}
+ if(!t||isDraft(t)||isExpired(t)||!withinStoreWindow(t)){$('sharedTaskHint').textContent='此任務不存在、尚未發布或已截止，可進入門市查看其他任務';return;}
  if(t.stores?.length&&!t.stores.includes(store.id)){
   $('sharedTaskHint').textContent='這個任務未指派給此門市，請確認門市名稱';return;
  }
@@ -66,9 +66,12 @@ $('quickAdminLogin').onclick=async()=>{
   }catch(e){error.textContent='快速登入失敗：'+e.message;}
 };
 $('adminSignIn').onclick=async()=>{try{$('adminError').textContent='';stop();await signOut(auth);const cred=await signInWithEmailAndPassword(auth,$('email').value.trim(),$('password').value);const a=await getDoc(doc(db,'admins',cred.user.uid));if(!a.exists()||a.data().enabled!==true)throw Error('此帳號未獲管理者授權');admin=true;store=null;ownerId=cred.user.uid;show('adminPage');openAdmin();say('管理者已登入')}catch(e){$('adminError').textContent=e.message;admin=false;await signOut(auth).catch(()=>{})}};
+// 門市僅顯示任務日期在最近 14 個日曆日內（含今天）或未來日期的任務。
+// 以本地日期比較，避免跨時區造成日期偏移。
+function withinStoreWindow(t){const day=t.time;if(!/^\d{4}-\d{2}-\d{2}$/.test(day||''))return false;const today=new Date();today.setHours(0,0,0,0);const earliest=new Date(today);earliest.setDate(earliest.getDate()-13);return day>=`${earliest.getFullYear()}-${String(earliest.getMonth()+1).padStart(2,'0')}-${String(earliest.getDate()).padStart(2,'0')}`;}
 function renderStoreTasks(){
  if(activeResponseTask && !tasks.some(t=>t.id===activeResponseTask&&!isDraft(t)&&!isExpired(t))){setTaskUrl(null);activeResponseTask=null;$('response').classList.add('hidden');$('tasks').classList.remove('hidden')}
- const eligible=tasks.filter(t=>!isDraft(t)&&(!t.stores?.length||t.stores.includes(store.id)));
+ const eligible=tasks.filter(t=>!isDraft(t)&&withinStoreWindow(t)&&(!t.stores?.length||t.stores.includes(store.id)));
  const live=sortedTasks(eligible.filter(t=>!isExpired(t)),$('storeSort').value);
  const past=sortedTasks(eligible.filter(isExpired),$('storeSort').value);
  const card=(t,ended)=>`<div class="card store-task-card" role="button" tabindex="0" data-task="${esc(t.id)}" aria-label="開啟任務 ${esc(t.title)}"><h3>${esc(t.title)}</h3><p>${esc(t.time)}</p><p class="muted">截止 ${esc(t.deadline||'未設定')}　${ended?'已截止':answers[t.id]?.submitted?'已完成':answers[t.id]?'填寫中':'待填寫'}</p></div>`;
@@ -78,7 +81,7 @@ function renderStoreTasks(){
  $('tasks').querySelectorAll('[data-task]').forEach(card=>{const open=()=>openResponse(tasks.find(t=>t.id===card.dataset.task));card.onclick=open;card.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();open()}}});
 }
 const expired=t=>!!(t.deadlineAt?.toMillis&&Date.now()>t.deadlineAt.toMillis());
-function openResponse(t){if(!t||isDraft(t))return;setTaskUrl(t.id);activeResponseTask=t.id;$('tasks').classList.add('hidden');$('storeSort').parentElement.classList.add('hidden');const panel=$('response'),a=answers[t.id]?.answers||{},readonly=expired(t);panel.classList.remove('hidden');panel.innerHTML=`<button id="closeResponse" class="secondary">返回列表</button><h2>${esc(t.title)}</h2><p>${esc(t.time)}</p><p style="white-space:pre-wrap">${esc(t.description)}</p><p class="muted">截止 ${esc(t.deadline||'未設定')}</p>${(t.references||[]).map(u=>cleanUrl(u)?`<button type="button" class="image-trigger" data-lightbox="${esc(cleanUrl(u))}" aria-label="放大查看參考照片"><img class="preview" src="${esc(cleanUrl(u))}" alt="參考照片"></button>`:'').join('')}<div id="responseFields"></div><p id="saveState" class="muted">${readonly?'已截止 無法修改':'填寫後自動儲存'}</p><button id="submitResponse" ${readonly?'disabled':''}>完成回饋</button>`;$('closeResponse').onclick=()=>{setTaskUrl(null);sharedTaskId=null;activeResponseTask=null;panel.classList.add('hidden');$('tasks').classList.remove('hidden');$('storeSort').parentElement.classList.remove('hidden')};
+function openResponse(t){if(!t||isDraft(t)||!withinStoreWindow(t))return;setTaskUrl(t.id);activeResponseTask=t.id;$('tasks').classList.add('hidden');$('storeSort').parentElement.classList.add('hidden');const panel=$('response'),a=answers[t.id]?.answers||{},readonly=expired(t);panel.classList.remove('hidden');panel.innerHTML=`<button id="closeResponse" class="secondary">返回列表</button><h2>${esc(t.title)}</h2><p>${esc(t.time)}</p><p style="white-space:pre-wrap">${esc(t.description)}</p><p class="muted">截止 ${esc(t.deadline||'未設定')}</p>${(t.references||[]).map(u=>cleanUrl(u)?`<button type="button" class="image-trigger" data-lightbox="${esc(cleanUrl(u))}" aria-label="放大查看參考照片"><img class="preview" src="${esc(cleanUrl(u))}" alt="參考照片"></button>`:'').join('')}<div id="responseFields"></div><p id="saveState" class="muted">${readonly?'已截止 無法修改':'填寫後自動儲存'}</p><button id="submitResponse" ${readonly?'disabled':''}>完成回饋</button>`;$('closeResponse').onclick=()=>{setTaskUrl(null);sharedTaskId=null;activeResponseTask=null;panel.classList.add('hidden');$('tasks').classList.remove('hidden');$('storeSort').parentElement.classList.remove('hidden')};
 $('responseFields').innerHTML=(t.questions||[]).map((q,i)=>`<div class="question"><label>${i+1}. ${esc(q.label)} ${q.required?'*':''}</label>${q.type==='yesno'?`<div class="yesno-group" role="group" aria-label="${esc(q.label)}" data-yesno="${esc(q.id)}"><button type="button" class="yesno-btn yes ${a[q.id]==='是'?'is-selected':''}" data-choice="是" aria-pressed="${a[q.id]==='是'}" ${readonly?'disabled':''}>✓ 是</button><button type="button" class="yesno-btn no ${a[q.id]==='否'?'is-selected':''}" data-choice="否" aria-pressed="${a[q.id]==='否'}" ${readonly?'disabled':''}>✕ 否</button></div>`:q.type==='text'?`<textarea data-answer="${esc(q.id)}" ${readonly?'disabled':''}>${esc(a[q.id]||'')}</textarea>`:`<input data-photo="${esc(q.id)}" type="file" accept="image/jpeg,image/png,image/webp" ${readonly?'disabled':''}><div>${cleanUrl(a[q.id])?`<button type="button" class="image-trigger photo-link" data-lightbox="${esc(cleanUrl(a[q.id]))}">查看已上傳照片</button>`:'尚未上傳'}</div>`}</div>`).join('');
 $('responseFields').querySelectorAll('[data-answer]').forEach(el=>el.oninput=()=>{const v={...(answers[t.id]?.answers||{}),[el.dataset.answer]:el.value};answers[t.id]={...(answers[t.id]||{}),answers:v};queueResponse(t,v)});
 $('responseFields').querySelectorAll('[data-yesno]').forEach(group=>{group.querySelectorAll('[data-choice]').forEach(btn=>btn.onclick=()=>{if(readonly)return;const choice=btn.dataset.choice;group.querySelectorAll('[data-choice]').forEach(b=>{const selected=b.dataset.choice===choice;b.classList.toggle('is-selected',selected);b.setAttribute('aria-pressed',String(selected))});const v={...(answers[t.id]?.answers||{}),[group.dataset.yesno]:choice};answers[t.id]={...(answers[t.id]||{}),answers:v};queueResponse(t,v)})});
@@ -118,7 +121,7 @@ function openTaskFeedback(t){activeFeedbackTask=t.id;$('feedbackTitle').textCont
 $('backAdminTasks').onclick=()=>showAdminSection('list');
 $('backFromFeedback').onclick=()=>showAdminSection('list');
 function renderAdminTasks(){
- const ordered=sortedTasks(tasks,$('adminSort').value);
+ const selectedDate=$('adminDate').value;const ordered=sortedTasks(selectedDate?tasks.filter(t=>t.time===selectedDate):tasks,$('adminSort').value);
  const groups=[['進行中',ordered.filter(t=>!isDraft(t)&&!isExpired(t))],['暫存任務',ordered.filter(isDraft)],['已截止',ordered.filter(t=>!isDraft(t)&&isExpired(t))]];
  const card=t=>`<div class="task"><div class="task-summary"><div><strong>${esc(t.title)}</strong><p class="muted">任務日期 ${esc(t.time)} ｜ 截止 ${esc(t.deadline||'未設定')}</p></div><span class="pill">${isDraft(t)?'暫存':isExpired(t)?'已截止':feedbackRows.filter(r=>r.taskId===t.id).length+' 筆回饋'}</span></div><div class="task-actions"><button data-edit="${esc(t.id)}">編輯</button><button class="danger" data-delete-task="${esc(t.id)}">刪除</button><button class="secondary" data-feedback="${esc(t.id)}">回饋查看</button><button class="secondary" data-export="${esc(t.id)}">匯出 Excel</button>${!isDraft(t)?`<button class="secondary" data-share="${esc(t.id)}">分享網址</button>`:''}</div></div>`;
  $('adminTasks').innerHTML=groups.map(([name,items],i)=>`<details class="task-category" ${i===0?'open':''}><summary>${name}（${items.length}）</summary><div>${items.map(card).join('')||'<p class="muted">目前沒有任務</p>'}</div></details>`).join('');
@@ -153,7 +156,7 @@ function validateTask(t){if(!t.title?.trim())return '請填寫任務名稱';if(!
 function queueTask(){const invalid=editing.status==='draft'?'':validateTask(editing);if(invalid){clearTimeout(saveTimers.get('task'));$('editorStatus').textContent='尚未儲存：'+invalid;return}const snap=structuredClone(editing),n=epoch,k='task';clearTimeout(saveTimers.get(k));$('editorStatus').textContent='等待儲存';saveTimers.set(k,setTimeout(()=>{if(epoch===n && editing?.id===snap.id)persistTask(snap).catch(e=>$('editorStatus').textContent='儲存失敗：'+e.message)},850))}
 async function persistTask(t){const invalid=t.status==='draft'?'':validateTask(t);if(invalid)throw Error(invalid);const data={title:t.title,time:t.time,description:t.description,deadline:t.deadline,stores:t.stores||[],references:t.references||[],questions:t.questions||[],status:t.status||'published',updatedAt:serverTimestamp()};if(t.deadline){const d=new Date(t.deadline);if(Number.isNaN(d.getTime()))throw Error('截止日期無效');data.deadlineAt=Timestamp.fromDate(d)}else data.deadlineAt=null;await setDoc(scoped('tasks',t.id),{...data,ownerId});$('editorStatus').textContent='已自動儲存'}
 
-$('storeSort').onchange=()=>{if(store)renderStoreTasks()};$('adminSort').onchange=()=>{if(admin)renderAdminTasks()};$('saveTaskNow').onclick=async()=>{if(!editing)return;try{await persistTask(structuredClone(editing));$('editorStatus').textContent='儲存成功'}catch(e){$('editorStatus').textContent='尚未儲存：'+e.message}};// 專用管理者入口：index.html?admin=1，不在門市登入頁顯示按鈕。
+$('adminDate').onchange=()=>{if(admin)renderAdminTasks()};$('clearAdminDate').onclick=()=>{$('adminDate').value='';if(admin)renderAdminTasks()};$('storeSort').onchange=()=>{if(store)renderStoreTasks()};$('adminSort').onchange=()=>{if(admin)renderAdminTasks()};$('saveTaskNow').onclick=async()=>{if(!editing)return;try{await persistTask(structuredClone(editing));$('editorStatus').textContent='儲存成功'}catch(e){$('editorStatus').textContent='尚未儲存：'+e.message}};// 專用管理者入口：index.html?admin=1，不在門市登入頁顯示按鈕。
 const adminRoute=new URLSearchParams(location.search).get('admin')==='1';
 if(adminRoute){show('adminLogin');say('管理者登入');}
 else {
