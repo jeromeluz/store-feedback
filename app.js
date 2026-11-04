@@ -2,7 +2,7 @@ import {initializeApp} from 'https://www.gstatic.com/firebasejs/11.10.0/firebase
 import {getAuth,signInAnonymously,signInWithEmailAndPassword,signOut,onAuthStateChanged} from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js';
 import {getFirestore,collection,doc,getDoc,getDocs,setDoc,deleteDoc,onSnapshot,serverTimestamp,Timestamp,runTransaction,query,where} from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js';
 import {firebaseConfig,cloudinary} from './config.js';
-console.info('區組回饋平台 build 20261104-15');
+console.info('區組回饋平台 build 20261104-17');
 const app=initializeApp(firebaseConfig),auth=getAuth(app),db=getFirestore(app),$=id=>document.getElementById(id);
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const cleanUrl=u=>{try{const x=new URL(u);return x.protocol==='https:'&&x.hostname==='res.cloudinary.com'&&x.pathname.startsWith('/'+cloudinary.cloudName+'/')?x.href:''}catch{return ''}};
@@ -25,7 +25,7 @@ const scoped=(type,id)=>id?doc(db,'groups',ownerId,type,id):collection(db,'group
 const directoryId=name=>encodeURIComponent(name.normalize('NFC').trim());
 async function anonymous(){if(!auth.currentUser||!auth.currentUser.isAnonymous){await signOut(auth);await signInAnonymously(auth)}}
 async function logout(){setTaskUrl(null);sharedTaskId=null;stop();store=null;ownerId=null;admin=false;localStorage.removeItem('storeName');await signOut(auth);show('login');say('請登入')}
-$('storeLogout').onclick=logout;$('adminLogout').onclick=logout;$('adminEntry').onclick=()=>{stop();show('adminLogin')};$('backLogin').onclick=()=>show('login');
+$('storeLogout').onclick=logout;$('adminLogout').onclick=logout;$('backLogin').onclick=()=>{location.href=baseUrl()};
 async function enterStore(name){
  stop();sharedTaskOpened=false;taskSnapshotReady=false;responseSnapshotReady=false;answers={};tasks=[];
  await anonymous();
@@ -71,9 +71,11 @@ function renderStoreTasks(){
  const eligible=tasks.filter(t=>!isDraft(t)&&(!t.stores?.length||t.stores.includes(store.id)));
  const live=sortedTasks(eligible.filter(t=>!isExpired(t)),$('storeSort').value);
  const past=sortedTasks(eligible.filter(isExpired),$('storeSort').value);
- const card=(t,ended)=>`<div class="card"><h3>${esc(t.title)}</h3><p>${esc(t.time)}</p><p class="muted">截止 ${esc(t.deadline||'未設定')}　${ended?'已截止':answers[t.id]?.submitted?'已完成':answers[t.id]?'填寫中':'待填寫'}</p><button ${ended?'class="secondary"':''} data-task="${esc(t.id)}">${ended?'查看已截止任務':'查看任務'}</button></div>`;
- $('tasks').innerHTML='<h2>進行中任務</h2>'+(live.map(t=>card(t,false)).join('')||'<p class="muted">目前沒有進行中任務</p>')+`<details class="card"><summary>已截止任務（${past.length}）</summary><div style="margin-top:14px">${past.map(t=>card(t,true)).join('')||'<p class="muted">沒有已截止任務</p>'}</div></details>`;
- $('tasks').querySelectorAll('[data-task]').forEach(b=>b.onclick=()=>openResponse(tasks.find(t=>t.id===b.dataset.task)));
+ const card=(t,ended)=>`<div class="card store-task-card" role="button" tabindex="0" data-task="${esc(t.id)}" aria-label="開啟任務 ${esc(t.title)}"><h3>${esc(t.title)}</h3><p>${esc(t.time)}</p><p class="muted">截止 ${esc(t.deadline||'未設定')}　${ended?'已截止':answers[t.id]?.submitted?'已完成':answers[t.id]?'填寫中':'待填寫'}</p></div>`;
+ const ongoing=live.filter(t=>!answers[t.id]?.submitted);
+ const completed=live.filter(t=>!!answers[t.id]?.submitted);
+ $('tasks').innerHTML='<h2>進行中任務</h2>'+(ongoing.map(t=>card(t,false)).join('')||'<p class="muted">目前沒有進行中任務</p>')+`<details class="card"><summary>已完成任務（${completed.length}）</summary><div style="margin-top:14px">${completed.map(t=>card(t,false)).join('')||'<p class="muted">目前沒有已完成任務</p>'}</div></details><details class="card"><summary>已截止任務（${past.length}）</summary><div style="margin-top:14px">${past.map(t=>card(t,true)).join('')||'<p class="muted">沒有已截止任務</p>'}</div></details>`;
+ $('tasks').querySelectorAll('[data-task]').forEach(card=>{const open=()=>openResponse(tasks.find(t=>t.id===card.dataset.task));card.onclick=open;card.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();open()}}});
 }
 const expired=t=>!!(t.deadlineAt?.toMillis&&Date.now()>t.deadlineAt.toMillis());
 function openResponse(t){if(!t||isDraft(t))return;setTaskUrl(t.id);activeResponseTask=t.id;$('tasks').classList.add('hidden');$('storeSort').parentElement.classList.add('hidden');const panel=$('response'),a=answers[t.id]?.answers||{},readonly=expired(t);panel.classList.remove('hidden');panel.innerHTML=`<button id="closeResponse" class="secondary">返回列表</button><h2>${esc(t.title)}</h2><p>${esc(t.time)}</p><p style="white-space:pre-wrap">${esc(t.description)}</p><p class="muted">截止 ${esc(t.deadline||'未設定')}</p>${(t.references||[]).map(u=>cleanUrl(u)?`<button type="button" class="image-trigger" data-lightbox="${esc(cleanUrl(u))}" aria-label="放大查看參考照片"><img class="preview" src="${esc(cleanUrl(u))}" alt="參考照片"></button>`:'').join('')}<div id="responseFields"></div><p id="saveState" class="muted">${readonly?'已截止 無法修改':'填寫後自動儲存'}</p><button id="submitResponse" ${readonly?'disabled':''}>完成回饋</button>`;$('closeResponse').onclick=()=>{setTaskUrl(null);sharedTaskId=null;activeResponseTask=null;panel.classList.add('hidden');$('tasks').classList.remove('hidden');$('storeSort').parentElement.classList.remove('hidden')};
@@ -151,7 +153,17 @@ function validateTask(t){if(!t.title?.trim())return '請填寫任務名稱';if(!
 function queueTask(){const invalid=editing.status==='draft'?'':validateTask(editing);if(invalid){clearTimeout(saveTimers.get('task'));$('editorStatus').textContent='尚未儲存：'+invalid;return}const snap=structuredClone(editing),n=epoch,k='task';clearTimeout(saveTimers.get(k));$('editorStatus').textContent='等待儲存';saveTimers.set(k,setTimeout(()=>{if(epoch===n && editing?.id===snap.id)persistTask(snap).catch(e=>$('editorStatus').textContent='儲存失敗：'+e.message)},850))}
 async function persistTask(t){const invalid=t.status==='draft'?'':validateTask(t);if(invalid)throw Error(invalid);const data={title:t.title,time:t.time,description:t.description,deadline:t.deadline,stores:t.stores||[],references:t.references||[],questions:t.questions||[],status:t.status||'published',updatedAt:serverTimestamp()};if(t.deadline){const d=new Date(t.deadline);if(Number.isNaN(d.getTime()))throw Error('截止日期無效');data.deadlineAt=Timestamp.fromDate(d)}else data.deadlineAt=null;await setDoc(scoped('tasks',t.id),{...data,ownerId});$('editorStatus').textContent='已自動儲存'}
 
-$('storeSort').onchange=()=>{if(store)renderStoreTasks()};$('adminSort').onchange=()=>{if(admin)renderAdminTasks()};$('saveTaskNow').onclick=async()=>{if(!editing)return;try{await persistTask(structuredClone(editing));$('editorStatus').textContent='儲存成功'}catch(e){$('editorStatus').textContent='尚未儲存：'+e.message}};onAuthStateChanged(auth,()=>{});say('請登入');
+$('storeSort').onchange=()=>{if(store)renderStoreTasks()};$('adminSort').onchange=()=>{if(admin)renderAdminTasks()};$('saveTaskNow').onclick=async()=>{if(!editing)return;try{await persistTask(structuredClone(editing));$('editorStatus').textContent='儲存成功'}catch(e){$('editorStatus').textContent='尚未儲存：'+e.message}};// 專用管理者入口：index.html?admin=1，不在門市登入頁顯示按鈕。
+const adminRoute=new URLSearchParams(location.search).get('admin')==='1';
+if(adminRoute){show('adminLogin');say('管理者登入');}
+else {
+ const remembered=localStorage.getItem('storeName');
+ if(remembered){$('storeName').value=remembered;onAuthStateChanged(auth,async user=>{
+  if(window.__storeRestoreAttempted)return;
+  window.__storeRestoreAttempted=true;
+  try{await enterStore(remembered)}catch(e){$('loginError').textContent='自動登入失敗：'+e.message;show('login');say('請登入');}
+ });}else say('請登入');
+}
 
 
 // 全站照片燈箱：不開新分頁，按 Esc、關閉按鈕或點擊背景可關閉。
